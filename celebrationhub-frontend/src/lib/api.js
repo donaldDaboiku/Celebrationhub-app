@@ -57,7 +57,7 @@ export const login = async (email, password) => {
 export const logout = async () => {
     try {
         await fetchAPI('/auth/logout', { method: 'POST' });
-    } catch {
+    } catch (_) {
         // ignore — clear local state regardless
     } finally {
         if (typeof window !== 'undefined') {
