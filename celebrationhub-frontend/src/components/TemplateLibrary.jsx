@@ -76,7 +76,13 @@ useEffect(() => {
         {filteredTemplates.map(template => (
           <div key={template.id} className="template-card">
             <div className="template-preview" onClick={() => setSelectedTemplate(template)}>
-              <Image src={template.previewUrl} alt={template.name} />
+              <Image
+                src={template.previewUrl}
+                alt={template.name}
+                fill
+                sizes="(max-width: 768px) 100vw, 33vw"
+                style={{ objectFit: 'cover' }}
+              />
               <div className="preview-overlay">
                 <button className="preview-btn">Preview</button>
               </div>
@@ -105,7 +111,15 @@ useEffect(() => {
           <div className="modal" onClick={e => e.stopPropagation()}>
             <button className="close-btn" onClick={() => setSelectedTemplate(null)}>×</button>
             <h2>{selectedTemplate.name}</h2>
-            <Image src={selectedTemplate.previewUrl} alt={selectedTemplate.name} />
+            <div className="modal-image">
+              <Image
+                src={selectedTemplate.previewUrl}
+                alt={selectedTemplate.name}
+                fill
+                sizes="(max-width: 768px) 100vw, 600px"
+                style={{ objectFit: 'cover' }}
+              />
+            </div>
             <p>{selectedTemplate.description}</p>
             <button
               className="modal-action-btn"
@@ -194,9 +208,7 @@ useEffect(() => {
           overflow: hidden;
         }
 
-        .template-preview img {
-          width: 100%;
-          height: 100%;
+        .template-preview :global(img) {
           object-fit: cover;
         }
 
@@ -307,9 +319,12 @@ useEffect(() => {
           margin-bottom: 16px;
         }
 
-        .modal img {
+        .modal-image {
+          position: relative;
           width: 100%;
+          aspect-ratio: 3/2;
           border-radius: 8px;
+          overflow: hidden;
           margin-bottom: 16px;
         }
 
