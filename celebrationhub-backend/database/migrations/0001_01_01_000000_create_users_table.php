@@ -6,9 +6,6 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('users', function (Blueprint $table) {
@@ -16,10 +13,12 @@ return new class extends Migration
             $table->string('name');
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
-            $table->string('password'); 
-            $table->string('sender_id')->nullable()->after('role'); // Dynamic Termii sender ID
-            $table->date('date_of_birth')->nullable()->after('sender_id'); // For birthday
-            $table->date('anniversary_date')->nullable()->after('date_of_birth'); // Optional anniversary
+            $table->string('password');
+            $table->string('role')->default('admin');
+            $table->string('sender_id')->nullable();
+            $table->date('date_of_birth')->nullable();
+            $table->date('anniversary_date')->nullable();
+            $table->timestamp('last_login_at')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });
@@ -40,14 +39,9 @@ return new class extends Migration
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
-        Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn(['sender_id', 'date_of_birth', 'anniversary_date']);
-        });
+        Schema::dropIfExists('users');
         Schema::dropIfExists('password_reset_tokens');
         Schema::dropIfExists('sessions');
     }

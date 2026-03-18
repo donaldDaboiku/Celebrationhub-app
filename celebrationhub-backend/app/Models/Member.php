@@ -6,7 +6,13 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Carbon\Carbon;
 
+/**
+ * @property Carbon|null $birthday
+ * @property Carbon|null $anniversary
+ * @property-read string $full_name
+ */
 class Member extends Model
 {
     use HasFactory;
@@ -19,7 +25,7 @@ class Member extends Model
         'birthday',
         'anniversary',
         'email',
-        'phone', 
+        'phone',
         'address',
         'city',
         'state',
@@ -33,16 +39,17 @@ class Member extends Model
     ];
 
     protected $casts = [
-        'birthday' => 'date',
+        'birthday'    => 'date',
         'anniversary' => 'date',
-        'active' => 'boolean',
-        'approved' => 'boolean',
-        'tags' => 'array',
+        'active'      => 'boolean',
+        'approved'    => 'boolean',
+        'tags'        => 'array',
     ];
 
     protected $appends = ['full_name'];
 
-    // Accessors
+    // --- Accessors ---
+
     public function getFullNameAttribute(): string
     {
         $parts = array_filter([
@@ -50,11 +57,12 @@ class Member extends Model
             $this->first_name,
             $this->last_name,
         ]);
-        
+
         return implode(' ', $parts);
     }
 
-    // Relationships
+    // --- Relationships ---
+
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
@@ -65,7 +73,8 @@ class Member extends Model
         return $this->hasMany(Celebration::class);
     }
 
-    // Scopes
+    // --- Scopes ---
+
     public function scopeActive($query)
     {
         return $query->where('active', true);
@@ -76,16 +85,45 @@ class Member extends Model
         return $query->where('approved', true);
     }
 
-    public function scopeUpcomingBirthdays($query, $days = 7)
+    /**
+     * Upcoming birthdays within the next $days days.
+     *
+     * Handles cross-month windows correctly (e.g. Jan 28 → Feb 3).
+     */
+    public function scopeUpcomingBirthdays($query, int $days = 7)
     {
-        $today = now();
-        $futureDate = now()->addDays($days);
+        $today  = Carbon::today();
+        $window = collect(range(0, $days - 1))
+            ->map(fn ($d) => $today->copy()->addDays($d));
 
         return $query->whereNotNull('birthday')
-            ->where(function ($q) use ($today, $futureDate) {
-                $q->whereRaw('MONTH(birthday) = ?', [$today->month])
-                  ->whereRaw('DAY(birthday) >= ?', [$today->day])
-                  ->whereRaw('DAY(birthday) <= ?', [$futureDate->day]);
+            ->where(function ($q) use ($window) {
+                foreach ($window as $date) {
+                    $q->orWhere(function ($q2) use ($date) {
+                        $q2->whereRaw('DAY(birthday) = ?', [$date->day])
+                           ->whereRaw('MONTH(birthday) = ?', [$date->month]);
+                    });
+                }
+            });
+    }
+
+    /**
+     * Upcoming anniversaries within the next $days days.
+     */
+    public function scopeUpcomingAnniversaries($query, int $days = 7)
+    {
+        $today  = Carbon::today();
+        $window = collect(range(0, $days - 1))
+            ->map(fn ($d) => $today->copy()->addDays($d));
+
+        return $query->whereNotNull('anniversary')
+            ->where(function ($q) use ($window) {
+                foreach ($window as $date) {
+                    $q->orWhere(function ($q2) use ($date) {
+                        $q2->whereRaw('DAY(anniversary) = ?', [$date->day])
+                           ->whereRaw('MONTH(anniversary) = ?', [$date->month]);
+                    });
+                }
             });
     }
 }

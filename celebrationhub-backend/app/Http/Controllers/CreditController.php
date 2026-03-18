@@ -3,48 +3,35 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use App\Models\Organization;
+use App\Services\PaystackService;
 
 class CreditController extends Controller
 {
-    public function balance()
+    public function balance(Request $request)
     {
-        // Get user's organization
-        // $org = auth()->user()->organization;
+        $org = $request->user()->organization;
 
         return response()->json([
-            'balance' => 245 // Replace with: $org->sms_credits
+            'balance' => $org->sms_credits ?? 0,
         ]);
     }
 
     public function transactions(Request $request)
     {
         $limit = $request->input('limit', 10);
+        $orgId = $request->user()->organization_id;
 
-        // Later: Get from CreditTransaction model
-        // $transactions = CreditTransaction::where('organization_id', auth()->user()->organization_id)
+        // TODO: uncomment when CreditTransaction model is created
+        // $transactions = \App\Models\CreditTransaction::where('organization_id', $orgId)
         //     ->orderBy('created_at', 'desc')
         //     ->limit($limit)
         //     ->get();
 
-        $transactions = [
-            [
-                'id' => 123,
-                'type' => 'purchase',
-                'amount' => 500,
-                'balanceAfter' => 745,
-                'reference' => 'PSK_abc123def',
-                'createdAt' => now()->subDays(2)->toISOString()
-            ],
-            [
-                'id' => 122,
-                'type' => 'usage',
-                'amount' => -1,
-                'balanceAfter' => 245,
-                'reference' => null,
-                'createdAt' => now()->subHours(5)->toISOString()
-            ]
-        ];
+        // Placeholder until CreditTransaction model exists
+        $transactions = [];
 
         return response()->json(['transactions' => $transactions]);
     }
@@ -52,56 +39,54 @@ class CreditController extends Controller
     public function purchase(Request $request)
     {
         $request->validate([
-            'package' => 'required|in:100,500,1000'
+            'package' => 'required|in:100,500,1000',
         ]);
-
-        $package = $request->input('package');
 
         $packages = [
-            '100' => ['credits' => 100, 'price' => 20000], // Price in kobo (₦200)
-            '500' => ['credits' => 500, 'price' => 90000], // ₦900
-            '1000' => ['credits' => 1000, 'price' => 160000] // ₦1600
+            '100'  => ['credits' => 100,  'price' => 20000],
+            '500'  => ['credits' => 500,  'price' => 90000],
+            '1000' => ['credits' => 1000, 'price' => 160000],
         ];
 
+        $package        = $request->input('package');
         $packageDetails = $packages[$package];
+        $user           = $request->user();
+        $org            = $user->organization;
 
-        // Initialize Paystack payment
-        $paystackSecretKey = env('PAYSTACK_SECRET_KEY');
+        $paystackSecretKey = config('services.paystack.secret_key');
 
+        /** @var Response $response */
         $response = Http::withHeaders([
             'Authorization' => "Bearer {$paystackSecretKey}",
-            'Content-Type' => 'application/json',
+            'Content-Type'  => 'application/json',
         ])->post('https://api.paystack.co/transaction/initialize', [
-            'email' => 'user@example.com', // Replace with: auth()->user()->email
-            'amount' => $packageDetails['price'],
-            'metadata' => [
-                'type' => 'credit_purchase',
-                'package' => $package,
-                'credits' => $packageDetails['credits'],
-                'organization_id' => 1 // Replace with: auth()->user()->organization_id
+            'email'        => $user->email,
+            'amount'       => $packageDetails['price'],
+            'metadata'     => [
+                'type'            => 'credit_purchase',
+                'package'         => $package,
+                'credits'         => $packageDetails['credits'],
+                'organization_id' => $org->id,
             ],
-            'callback_url' => env('FRONTEND_URL') . '/dashboard/credits/callback'
+            'callback_url' => config('app.frontend_url') . '/dashboard/credits/callback',
         ]);
 
-        $data = json_decode((string) $response, true) ?? [];
+        $data = $response->json();
 
-        if ($data['status']) {
+        if ($response->successful() && ($data['status'] ?? false)) {
             return response()->json([
                 'paymentUrl' => $data['data']['authorization_url'],
-                'reference' => $data['data']['reference']
+                'reference'  => $data['data']['reference'],
             ]);
         }
 
-        return response()->json([
-            'error' => 'Failed to initialize payment'
-        ], 400);
+        return response()->json(['error' => 'Failed to initialize payment'], 400);
     }
 
     public function paystackWebhook(Request $request)
     {
-        // Verify Paystack signature
-        $paystackSecretKey = env('PAYSTACK_SECRET_KEY');
-        $signature = $request->header('x-paystack-signature');
+        $paystackSecretKey = config('services.paystack.secret_key');
+        $signature         = $request->header('x-paystack-signature');
 
         if ($signature !== hash_hmac('sha512', $request->getContent(), $paystackSecretKey)) {
             return response()->json(['error' => 'Invalid signature'], 401);
@@ -109,25 +94,24 @@ class CreditController extends Controller
 
         $data = $request->all();
 
-        if ($data['event'] === 'charge.success') {
-            $metadata = $data['data']['metadata'];
+        if (($data['event'] ?? '') === 'charge.success') {
+            $metadata = $data['data']['metadata'] ?? [];
 
-            if ($metadata['type'] === 'credit_purchase') {
-                // Update organization credits
-                // $org = Organization::find($metadata['organization_id']);
-                // $org->increment('sms_credits', $metadata['credits']);
+            if (($metadata['type'] ?? '') === 'credit_purchase') {
+                $org = Organization::find($metadata['organization_id']);
 
-                // Create transaction record
-                // CreditTransaction::create([
-                //     'organization_id' => $org->id,
-                //     'type' => 'purchase',
-                //     'amount' => $metadata['credits'],
-                //     'balance_after' => $org->sms_credits,
-                //     'reference' => $data['data']['reference']
-                // ]);
+                if ($org) {
+                    $org->increment('sms_credits', $metadata['credits']);
 
-                // Send confirmation email
-                // Mail::to($org->email)->send(new CreditPurchaseConfirmation($org, $metadata['credits']));
+                    // TODO: create CreditTransaction record
+                    // \App\Models\CreditTransaction::create([
+                    //     'organization_id' => $org->id,
+                    //     'type'            => 'purchase',
+                    //     'amount'          => $metadata['credits'],
+                    //     'balance_after'   => $org->sms_credits,
+                    //     'reference'       => $data['data']['reference'],
+                    // ]);
+                }
             }
         }
 

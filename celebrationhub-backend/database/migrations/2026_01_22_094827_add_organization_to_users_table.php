@@ -9,9 +9,11 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->foreignId('organization_id')->after('id')->constrained()->cascadeOnDelete();
-            $table->string('role')->default('admin')->after('password');
-            $table->timestamp('last_login_at')->nullable()->after('remember_token');
+            $table->foreignId('organization_id')
+                  ->nullable()
+                  ->after('id')
+                  ->constrained()
+                  ->cascadeOnDelete();
         });
     }
 
@@ -19,7 +21,7 @@ return new class extends Migration
     {
         Schema::table('users', function (Blueprint $table) {
             $table->dropForeign(['organization_id']);
-            $table->dropColumn(['organization_id', 'role', 'last_login_at']);
+            $table->dropColumn('organization_id');
         });
     }
 };

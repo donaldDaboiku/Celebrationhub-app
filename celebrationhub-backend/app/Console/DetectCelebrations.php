@@ -2,23 +2,23 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\DetectCelebrations;
+use App\Jobs\DetectCelebrations as DetectCelebrationsJob;
 use Illuminate\Console\Command;
 
-class TestCelebrationDetection extends Command
+class DetectCelebrations extends Command
 {
     protected $signature = 'celebrations:detect';
     protected $description = 'Manually detect and schedule celebrations';
 
-    public function handle()
+    public function handle(): int
     {
         $this->info('Detecting celebrations...');
-        
-        DetectCelebrations::dispatch();
-        
+
+        DetectCelebrationsJob::dispatch();
+
         $this->info('Detection job dispatched!');
-        $this->info('Run "php artisan queue:work" to process the job');
-        
-        return 0;
+        $this->info('Run "php artisan queue:work" to process the job.');
+
+        return self::SUCCESS;
     }
 }

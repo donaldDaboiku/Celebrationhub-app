@@ -16,106 +16,102 @@ class DetectCelebrations implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /**
-     * Execute the job.
-     */
     public function handle(): void
     {
         Log::info('Running celebration detection...');
 
         $today = Carbon::today();
-        $day = $today->day;
+        $day   = $today->day;
         $month = $today->month;
 
-        // Find members with birthdays today
+        // Use generated virtual columns (indexed) instead of DAY()/MONTH() functions
         $birthdayMembers = Member::active()
             ->approved()
             ->whereNotNull('birthday')
-            ->whereRaw('DAY(birthday) = ?', [$day])
-            ->whereRaw('MONTH(birthday) = ?', [$month])
+            ->where('birthday_day', $day)
+            ->where('birthday_month', $month)
+            ->with('organization')
             ->get();
 
         Log::info("Found {$birthdayMembers->count()} birthdays today");
 
         foreach ($birthdayMembers as $member) {
+            /** @var Member $member */
             $this->scheduleCelebration($member, 'birthday');
         }
 
-        // Find members with anniversaries today
         $anniversaryMembers = Member::active()
             ->approved()
             ->whereNotNull('anniversary')
-            ->whereRaw('DAY(anniversary) = ?', [$day])
-            ->whereRaw('MONTH(anniversary) = ?', [$month])
+            ->where('anniversary_day', $day)
+            ->where('anniversary_month', $month)
+            ->with('organization')
             ->get();
 
         Log::info("Found {$anniversaryMembers->count()} anniversaries today");
 
         foreach ($anniversaryMembers as $member) {
+            /** @var Member $member */
             $this->scheduleCelebration($member, 'anniversary');
         }
 
         Log::info('Celebration detection completed');
     }
 
-    /**
-     * Schedule celebration for member
-     */
     protected function scheduleCelebration(Member $member, string $type): void
     {
-        // Check if already scheduled for today
-        $existing = Celebration::where('member_id', $member->id)
+        // Skip if already scheduled today
+        $exists = Celebration::where('member_id', $member->id)
             ->where('type', $type)
             ->whereDate('scheduled_for', Carbon::today())
             ->exists();
 
-        if ($existing) {
+        if ($exists) {
             Log::info("Celebration already scheduled for {$member->full_name}");
             return;
         }
 
-        // Get organization settings
-        $settings = $member->organization->settings;
-        $sendTime = $settings['send_time'] ?? '06:00';
+        $settings    = $member->organization->settings ?? [];
+        $sendTime    = $settings['send_time'] ?? '06:00';
+        $timezone    = $settings['timezone'] ?? 'Africa/Lagos';
 
-        // Calculate send time
-        $scheduledFor = Carbon::today()->setTimeFromTimeString($sendTime);
+        $scheduledFor = Carbon::today($timezone)->setTimeFromTimeString($sendTime);
 
-        // If time has passed today, send now
         if ($scheduledFor->isPast()) {
             $scheduledFor = Carbon::now();
         }
 
-        // Create celebration record
         $celebration = Celebration::create([
-            'member_id' => $member->id,
+            'member_id'       => $member->id,
             'organization_id' => $member->organization_id,
-            'type' => $type,
-            'status' => 'pending',
-            'scheduled_for' => $scheduledFor,
-            'message_text' => $this->generateMessage($member, $type),
+            'type'            => $type,
+            'status'          => 'pending',
+            'scheduled_for'   => $scheduledFor,
+            'message_text'    => $this->generateMessage($member, $type),
         ]);
 
-        // Dispatch job to send messages
-        SendCelebrationMessages::dispatch($celebration)
-            ->delay($scheduledFor);
+        SendCelebrationMessages::dispatch($celebration)->delay($scheduledFor);
 
         Log::info("Scheduled {$type} for {$member->full_name} at {$scheduledFor}");
     }
 
-    /**
-     * Generate celebration message
-     */
     protected function generateMessage(Member $member, string $type): string
     {
+        $settings = $member->organization->settings ?? [];
+        $messages = $settings['messages'] ?? [];
+
         if ($type === 'birthday') {
-            return "🎉 Happy Birthday {$member->full_name}!\n\n"
-                . "May God bless you with long life, good health, and prosperity.\n\n"
-                . "From your church family 💙";
+            $template = $messages['birthday_template']
+                ?? "🎉 Happy Birthday {$member->full_name}!\n\nMay God bless you with long life, good health, and prosperity.\n\nFrom your church family 💙";
+        } else {
+            $template = $messages['anniversary_template']
+                ?? "💍 Happy Wedding Anniversary {$member->full_name}!\n\nMay your home continue to be blessed with love, joy, and peace.\n\nFrom your church family 💙";
         }
 
-        return "💍 Happy Wedding Anniversary {$member->full_name}!\n\n"
-            . "May your home continue to be blessed with love, joy, and peace.\n\n"
-            . "From your church family 💙";
+        return str_replace(
+            ['{{name}}', '{{first_name}}', '{{title}}'],
+            [$member->full_name, $member->first_name, $member->title ?? ''],
+            $template
+        );
     }
 }
