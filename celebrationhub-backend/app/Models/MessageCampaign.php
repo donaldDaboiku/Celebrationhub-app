@@ -32,4 +32,9 @@ class MessageCampaign extends Model
     {
         return $this->belongsTo(Organization::class);
     }
+
+    public function logs()
+    {
+        return $this->hasMany(MessageLog::class, 'campaign_id');
+    }
 }

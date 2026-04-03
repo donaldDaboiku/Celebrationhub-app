@@ -1,30 +1,33 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { mockAnalytics } from '@/lib/mockData';
+import { useEffect, useState } from 'react';
+import { getDashboardAnalytics } from '@/lib/api';
+
+const growthOptions = [
+    { value: 'monthly', label: 'Monthly' },
+    { value: 'quarterly', label: 'Quarterly' },
+    { value: 'yearly', label: 'Yearly' },
+];
 
 export default function AnalyticsDashboard() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
-
-
+    const [growthPeriod, setGrowthPeriod] = useState('monthly');
 
     useEffect(() => {
         const loadData = async () => {
+            setLoading(true);
             try {
-                // For now, use mock data
-                // Later: const response = await fetchAPI('/analytics/dashboard');
-                setTimeout(() => {
-                    setData(mockAnalytics);
-                    setLoading(false);
-                }, 500);
+                const response = await getDashboardAnalytics(growthPeriod);
+                setData(response);
             } catch (error) {
                 console.error('Failed to load analytics:', error);
+            } finally {
                 setLoading(false);
             }
         };
 
         loadData();
-    }, []);
+    }, [growthPeriod]);
 
     if (loading) {
         return <div style={{ padding: '40px', textAlign: 'center' }}>Loading analytics...</div>;
@@ -34,9 +37,11 @@ export default function AnalyticsDashboard() {
         return <div style={{ padding: '40px', textAlign: 'center' }}>Failed to load analytics</div>;
     }
 
+    const maxGrowthCount = Math.max(...data.growthData.map((item) => item.count), 1);
+    const trendTone = (value) => (value >= 0 ? 'positive' : 'negative');
+
     return (
         <div className="analytics-dashboard">
-            {/* Month Summary Cards */}
             <div className="summary-grid">
                 <div className="summary-card">
                     <div className="card-header">
@@ -44,8 +49,8 @@ export default function AnalyticsDashboard() {
                         <span className="card-label">Birthdays This Month</span>
                     </div>
                     <div className="card-value">{data.monthSummary.birthdays}</div>
-                    <div className={`card-trend ${data.monthSummary.birthdayTrend > 0 ? 'positive' : 'negative'}`}>
-                        {data.monthSummary.birthdayTrend > 0 ? '↑' : '↓'} {Math.abs(data.monthSummary.birthdayTrend)}% vs last month
+                    <div className={`card-trend ${trendTone(data.monthSummary.birthdayTrend)}`}>
+                        {data.monthSummary.birthdayTrend >= 0 ? '↑' : '↓'} {Math.abs(data.monthSummary.birthdayTrend)}% vs last month
                     </div>
                 </div>
 
@@ -55,8 +60,8 @@ export default function AnalyticsDashboard() {
                         <span className="card-label">Messages Sent</span>
                     </div>
                     <div className="card-value">{data.monthSummary.messages}</div>
-                    <div className={`card-trend ${data.monthSummary.messageTrend > 0 ? 'positive' : 'negative'}`}>
-                        {data.monthSummary.messageTrend > 0 ? '↑' : '↓'} {Math.abs(data.monthSummary.messageTrend)}% vs last month
+                    <div className={`card-trend ${trendTone(data.monthSummary.messageTrend)}`}>
+                        {data.monthSummary.messageTrend >= 0 ? '↑' : '↓'} {Math.abs(data.monthSummary.messageTrend)}% vs last month
                     </div>
                 </div>
 
@@ -66,46 +71,111 @@ export default function AnalyticsDashboard() {
                         <span className="card-label">Delivery Rate</span>
                     </div>
                     <div className="card-value">{data.monthSummary.deliveryRate}%</div>
-                    <div className={`card-trend ${data.monthSummary.deliveryTrend > 0 ? 'positive' : 'negative'}`}>
-                        {data.monthSummary.deliveryTrend > 0 ? '↑' : '↓'} {Math.abs(data.monthSummary.deliveryTrend)}% vs last month
+                    <div className={`card-trend ${trendTone(data.monthSummary.deliveryTrend)}`}>
+                        {data.monthSummary.deliveryTrend >= 0 ? '↑' : '↓'} {Math.abs(data.monthSummary.deliveryTrend)}% vs last month
                     </div>
                 </div>
             </div>
 
-            {/* Member Growth Chart */}
             <div className="growth-section">
-                <h2>Member Growth</h2>
+                <div className="growth-head">
+                    <div>
+                        <h2>Member Growth</h2>
+                        <p className="growth-copy">Track growth month by month, by quarter, or across full years.</p>
+                    </div>
+                    <div className="growth-toggle" role="tablist" aria-label="Member growth period">
+                        {growthOptions.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                className={growthPeriod === option.value ? 'toggle active' : 'toggle'}
+                                onClick={() => setGrowthPeriod(option.value)}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
                 <p className="growth-stats">
-                    <strong>{data.totalMembers}</strong> total members • <strong>+{data.newMembersThisMonth}</strong> this month
+                    <strong>{data.totalMembers}</strong> total members • <strong>+{data.newMembersInPeriod}</strong> {data.newMembersLabel}
                 </p>
+                <p className="growth-range">Current view: {data.growthRangeLabel}</p>
                 <div className="chart">
                     {data.growthData.map((item, index) => (
                         <div key={index} className="chart-bar">
-                            <div className="bar" style={{ height: `${(item.count / 600) * 200}px` }}>
-                                <span className="bar-value">{item.count}</span>
+                            <div className="bar-shell">
+                                <div className="bar" style={{ height: `${Math.max((item.count / maxGrowthCount) * 220, 24)}px` }}>
+                                    <span className="bar-value">{item.count}</span>
+                                </div>
                             </div>
-                            <span className="bar-label">{item.month}</span>
+                            <span className="bar-label">{item.short_label || item.label}</span>
+                            <span className="bar-note">+{item.new_members}</span>
                         </div>
                     ))}
                 </div>
             </div>
 
-            {/* Upcoming Celebrations */}
+            <div className="breakdown-grid">
+                {data.memberBreakdowns.map((breakdown) => {
+                    const maxBreakdownCount = Math.max(...breakdown.items.map((item) => item.count), 1);
+
+                    return (
+                        <div key={breakdown.key} className="breakdown-card">
+                            <div className="breakdown-head">
+                                <div>
+                                    <h2>Members by {breakdown.label}</h2>
+                                    <p className="breakdown-copy">
+                                        {breakdown.items.length > 0
+                                            ? `${breakdown.filled_members} members have ${breakdown.label.toLowerCase()} values saved.`
+                                            : `No ${breakdown.label.toLowerCase()} values saved yet.`}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {breakdown.items.length === 0 ? (
+                                <div className="empty-state">Add member {breakdown.label.toLowerCase()} values to see this breakdown.</div>
+                            ) : (
+                                <div className="breakdown-list">
+                                    {breakdown.items.map((item) => (
+                                        <div key={`${breakdown.key}-${item.name}`} className="breakdown-item">
+                                            <div className="breakdown-row">
+                                                <span className="breakdown-name">{item.name}</span>
+                                                <strong className="breakdown-count">{item.count}</strong>
+                                            </div>
+                                            <div className="breakdown-track">
+                                                <div
+                                                    className="breakdown-fill"
+                                                    style={{ width: `${Math.max((item.count / maxBreakdownCount) * 100, 12)}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+
             <div className="upcoming-section">
                 <h2>Upcoming Celebrations</h2>
                 <div className="upcoming-list">
-                    {data.upcoming.map((event, index) => (
-                        <div key={index} className="upcoming-item">
-                            <div className="date-badge">
-                                <div className="date-day">{event.day}</div>
-                                <div className="date-month">{event.month}</div>
+                    {data.upcoming.length === 0 ? (
+                        <div className="empty-state">No birthdays or anniversaries in the next 7 days.</div>
+                    ) : (
+                        data.upcoming.map((event, index) => (
+                            <div key={index} className="upcoming-item">
+                                <div className="date-badge">
+                                    <div className="date-day">{event.day}</div>
+                                    <div className="date-month">{event.month}</div>
+                                </div>
+                                <div className="event-details">
+                                    <div className="event-type">{event.count} {event.type}</div>
+                                    <div className="event-names">{event.names.join(', ')}</div>
+                                </div>
                             </div>
-                            <div className="event-details">
-                                <div className="event-type">{event.count} {event.type}</div>
-                                <div className="event-names">{event.names.join(', ')}</div>
-                            </div>
-                        </div>
-                    ))}
+                        ))
+                    )}
                 </div>
             </div>
 
@@ -178,30 +248,100 @@ export default function AnalyticsDashboard() {
           box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
+        .breakdown-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 20px;
+          margin-bottom: 24px;
+        }
+
+        .breakdown-card {
+          background: white;
+          border-radius: 12px;
+          padding: 24px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
         h2 {
           font-family: Georgia, serif;
           font-size: 24px;
           margin-bottom: 8px;
         }
 
+        .growth-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 20px;
+          align-items: flex-start;
+          margin-bottom: 8px;
+        }
+
+        .growth-copy {
+          margin: 0;
+          color: #666;
+        }
+
+        .breakdown-copy {
+          margin: 0;
+          color: #666;
+        }
+
         .growth-stats {
           color: #666;
+          margin-bottom: 8px;
+        }
+
+        .growth-range {
           margin-bottom: 24px;
+          color: #475569;
+          font-size: 14px;
+        }
+
+        .growth-toggle {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+
+        .toggle {
+          border: 1px solid #dbe4f0;
+          background: #f8fafc;
+          border-radius: 999px;
+          padding: 10px 14px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #475569;
+          cursor: pointer;
+        }
+
+        .toggle.active {
+          background: linear-gradient(135deg, #4f46e5 0%, #f97316 100%);
+          color: white;
+          border-color: transparent;
         }
 
         .chart {
           display: flex;
           align-items: flex-end;
-          gap: 40px;
-          height: 250px;
+          gap: 20px;
+          min-height: 280px;
           padding: 20px 0;
+          overflow-x: auto;
         }
 
         .chart-bar {
-          flex: 1;
+          min-width: 82px;
           display: flex;
           flex-direction: column;
           align-items: center;
+        }
+
+        .bar-shell {
+          width: 100%;
+          height: 220px;
+          display: flex;
+          align-items: flex-end;
         }
 
         .bar {
@@ -230,6 +370,54 @@ export default function AnalyticsDashboard() {
           margin-top: 12px;
           color: #666;
           font-size: 14px;
+          font-weight: 600;
+        }
+
+        .bar-note {
+          margin-top: 4px;
+          color: #94a3b8;
+          font-size: 12px;
+        }
+
+        .breakdown-list {
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          margin-top: 18px;
+        }
+
+        .breakdown-item {
+          display: grid;
+          gap: 8px;
+        }
+
+        .breakdown-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .breakdown-name {
+          color: #0f172a;
+          font-weight: 600;
+        }
+
+        .breakdown-count {
+          color: #475569;
+        }
+
+        .breakdown-track {
+          height: 10px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          overflow: hidden;
+        }
+
+        .breakdown-fill {
+          height: 100%;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #4f46e5 0%, #f97316 100%);
         }
 
         .upcoming-list {
@@ -286,6 +474,14 @@ export default function AnalyticsDashboard() {
           color: #666;
         }
 
+        .empty-state {
+          padding: 20px;
+          background: #f9fafb;
+          border-radius: 8px;
+          color: #666;
+          text-align: center;
+        }
+
         @keyframes growUp {
           from {
             height: 0;
@@ -305,8 +501,12 @@ export default function AnalyticsDashboard() {
             grid-template-columns: 1fr;
           }
 
+          .growth-head {
+            flex-direction: column;
+          }
+
           .chart {
-            gap: 20px;
+            gap: 16px;
           }
         }
       `}</style>

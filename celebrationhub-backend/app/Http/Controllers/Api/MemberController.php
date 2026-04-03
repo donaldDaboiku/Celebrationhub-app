@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Member;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class MemberController extends Controller
 {
@@ -67,6 +68,14 @@ class MemberController extends Controller
             'anniversary' => 'nullable|date',
             'email' => 'nullable|email',
             'phone' => 'nullable|string|max:50',
+            'address' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:100',
+            'state' => 'nullable|string|max:100',
+            'country' => 'nullable|string|max:100',
+            'zip' => 'nullable|string|max:20',
+            'department' => 'nullable|string|max:100',
+            'designation' => 'nullable|string|max:100',
+            'unit' => 'nullable|string|max:100',
             'photo_url' => 'nullable|url',
             'tags' => 'nullable|array',
             'notes' => 'nullable|string',
@@ -103,6 +112,74 @@ class MemberController extends Controller
         ]);
     }
 
+    public function uploadPhoto(Request $request, Member $member)
+    {
+        if ($member->organization_id !== $request->user()->organization_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Member not found',
+            ], 404);
+        }
+
+        $request->validate([
+            'photo' => 'required|image|mimes:jpeg,png,jpg|max:2048',
+        ]);
+
+        if (! is_dir(public_path('member-photos'))) {
+            mkdir(public_path('member-photos'), 0755, true);
+        }
+
+        if ($member->photo_url) {
+            $oldPath = parse_url($member->photo_url, PHP_URL_PATH);
+            $oldAbsolutePath = $oldPath ? public_path(ltrim($oldPath, '/')) : null;
+
+            if ($oldAbsolutePath && str_starts_with($oldAbsolutePath, public_path('member-photos')) && file_exists($oldAbsolutePath)) {
+                unlink($oldAbsolutePath);
+            }
+        }
+
+        $file = $request->file('photo');
+        $filename = 'member-' . $member->id . '-' . Str::lower(Str::random(10)) . '.' . $file->getClientOriginalExtension();
+        $file->move(public_path('member-photos'), $filename);
+
+        $member->photo_url = asset('member-photos/' . $filename);
+        $member->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Member photo uploaded successfully',
+            'data' => $member->fresh(),
+        ]);
+    }
+
+    public function removePhoto(Request $request, Member $member)
+    {
+        if ($member->organization_id !== $request->user()->organization_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Member not found',
+            ], 404);
+        }
+
+        if ($member->photo_url) {
+            $oldPath = parse_url($member->photo_url, PHP_URL_PATH);
+            $oldAbsolutePath = $oldPath ? public_path(ltrim($oldPath, '/')) : null;
+
+            if ($oldAbsolutePath && str_starts_with($oldAbsolutePath, public_path('member-photos')) && file_exists($oldAbsolutePath)) {
+                unlink($oldAbsolutePath);
+            }
+        }
+
+        $member->photo_url = null;
+        $member->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Member photo removed successfully',
+            'data' => $member->fresh(),
+        ]);
+    }
+
     /**
      * Update the specified member
      */
@@ -124,6 +201,14 @@ class MemberController extends Controller
             'anniversary' => 'nullable|date',
             'email' => 'nullable|email',
             'phone' => 'nullable|string|max:50',
+            'address' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:100',
+            'state' => 'nullable|string|max:100',
+            'country' => 'nullable|string|max:100',
+            'zip' => 'nullable|string|max:20',
+            'department' => 'nullable|string|max:100',
+            'designation' => 'nullable|string|max:100',
+            'unit' => 'nullable|string|max:100',
             'photo_url' => 'nullable|url',
             'active' => 'nullable|boolean',
             'approved' => 'nullable|boolean',

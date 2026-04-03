@@ -41,6 +41,34 @@ return [
         'base_url' => 'https://api.ng.termii.com/api',
     ],
 
+    'whatsapp_meta' => [
+        'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'business_account_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID'),
+        'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
+    ],
+
+    'facebook' => [
+        'page_id' => env('FACEBOOK_PAGE_ID'),
+        'page_access_token' => env('FACEBOOK_PAGE_ACCESS_TOKEN'),
+    ],
+
+    'instagram' => [
+        'business_account_id' => env('INSTAGRAM_BUSINESS_ACCOUNT_ID'),
+        'access_token' => env('INSTAGRAM_ACCESS_TOKEN'),
+    ],
+
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'chat_id' => env('TELEGRAM_CHAT_ID'),
+    ],
+
+    'x' => [
+        'api_key' => env('X_API_KEY'),
+        'api_secret' => env('X_API_SECRET'),
+        'access_token' => env('X_ACCESS_TOKEN'),
+        'access_token_secret' => env('X_ACCESS_TOKEN_SECRET'),
+    ],
+
     'paystack' => [
     'public_key' => env('PAYSTACK_PUBLIC_KEY'),
     'secret_key' => env('PAYSTACK_SECRET_KEY'),

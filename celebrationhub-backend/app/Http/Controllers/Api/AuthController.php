@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\User;
 use App\Models\Subscription;
+use App\Services\EmailService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -21,7 +24,7 @@ class AuthController extends Controller
         $validated = $request->validate([
             'organization_name' => 'required|string|min:2|max:255',
             'email' => 'required|email|unique:users,email',
-            'password' => 'required|string|min:8',
+            'password' => ['required', 'string', Password::min(8)],
             'name' => 'required|string|min:2|max:255',
         ]);
 
@@ -49,6 +52,19 @@ class AuthController extends Controller
                     'email_enabled' => true,
                     'sms_enabled' => false,
                     'whatsapp_enabled' => false,
+                    'primary_channel' => 'email',
+                ],
+                'integrations' => [
+                    'email' => [
+                        'mailer' => 'smtp',
+                        'host' => '',
+                        'port' => 587,
+                        'username' => '',
+                        'password' => '',
+                        'encryption' => 'tls',
+                        'from_address' => $validated['email'],
+                        'from_name' => $validated['organization_name'],
+                    ],
                 ],
             ],
         ]);
@@ -88,6 +104,7 @@ class AuthController extends Controller
                     'id' => $organization->id,
                     'name' => $organization->name,
                     'slug' => $organization->slug,
+                    'logo_url' => $organization->logo_url,
                 ],
                 'token' => $token,
             ],
@@ -132,6 +149,7 @@ class AuthController extends Controller
                     'id' => $user->organization->id,
                     'name' => $user->organization->name,
                     'slug' => $user->organization->slug,
+                    'logo_url' => $user->organization->logo_url,
                 ],
                 'token' => $token,
             ],
@@ -173,6 +191,90 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Logged out successfully',
+        ]);
+    }
+
+    public function forgotPassword(Request $request, EmailService $emailService)
+    {
+        $validated = $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $user = User::with('organization')->where('email', $validated['email'])->first();
+
+        if ($user) {
+            $token = Str::upper(Str::random(8));
+
+            DB::table('password_reset_tokens')->updateOrInsert(
+                ['email' => $user->email],
+                [
+                    'token' => Hash::make($token),
+                    'created_at' => now(),
+                ]
+            );
+
+            $frontendBase = rtrim((string) env('FRONTEND_URL', 'http://localhost:3000'), '/');
+            $resetUrl = $frontendBase . '/reset-access?email=' . urlencode($user->email);
+
+            $emailService->sendAccessReset(
+                $user->email,
+                $user->name,
+                $token,
+                $resetUrl,
+                $user->organization
+            );
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'If that email exists, a reset code has been sent.',
+        ]);
+    }
+
+    public function resetAccess(Request $request)
+    {
+        $validated = $request->validate([
+            'email' => 'required|email',
+            'token' => 'required|string|min:6|max:32',
+            'name' => 'nullable|string|min:2|max:255',
+            'password' => ['required', 'confirmed', Password::min(8)],
+        ]);
+
+        $resetRecord = DB::table('password_reset_tokens')->where('email', $validated['email'])->first();
+
+        if (! $resetRecord) {
+            throw ValidationException::withMessages([
+                'email' => ['No reset request was found for that email address.'],
+            ]);
+        }
+
+        if (now()->diffInMinutes($resetRecord->created_at) > 60) {
+            DB::table('password_reset_tokens')->where('email', $validated['email'])->delete();
+
+            throw ValidationException::withMessages([
+                'token' => ['This reset code has expired. Request a new one and try again.'],
+            ]);
+        }
+
+        if (! Hash::check($validated['token'], $resetRecord->token)) {
+            throw ValidationException::withMessages([
+                'token' => ['The reset code is invalid.'],
+            ]);
+        }
+
+        $user = User::where('email', $validated['email'])->firstOrFail();
+
+        $user->forceFill([
+            'name' => $validated['name'] ?: $user->name,
+            'password' => Hash::make($validated['password']),
+        ])->save();
+
+        DB::table('password_reset_tokens')->where('email', $validated['email'])->delete();
+        DB::table('personal_access_tokens')->where('tokenable_type', User::class)->where('tokenable_id', $user->id)->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Account access updated successfully. You can now sign in with your email and new password.',
         ]);
     }
 }

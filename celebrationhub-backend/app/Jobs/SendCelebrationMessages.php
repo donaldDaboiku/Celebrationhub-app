@@ -38,13 +38,16 @@ class SendCelebrationMessages implements ShouldQueue
         $member = $this->celebration->member;
         $organization = $this->celebration->organization;
         $settings = $organization->settings ?? [];
+        $integrations = $settings['integrations'] ?? [];
+        $smsIntegration = $integrations['sms'] ?? [];
+        $whatsappIntegration = $integrations['whatsapp'] ?? [];
 
         Log::info("Sending {$this->celebration->type} messages for {$member->full_name}");
 
         $channels = [
-            'email' => ['sent' => false],
-            'sms' => ['sent' => false],
-            'whatsapp' => ['sent' => false],
+            'email' => ['sent' => false, 'error' => null],
+            'sms' => ['sent' => false, 'error' => null],
+            'whatsapp' => ['sent' => false, 'error' => null],
         ];
 
         // Generate design
@@ -72,27 +75,35 @@ class SendCelebrationMessages implements ShouldQueue
                     ? 'Happy Birthday! 🎉' 
                     : 'Happy Anniversary! 💍',
                 $this->celebration->message_text,
-                $designUrl
+                $designUrl,
+                $organization
             );
 
             $channels['email'] = [
                 'sent' => $result['success'],
                 'sent_at' => now()->toDateTimeString(),
+                'error' => $result['error'] ?? null,
             ];
+        } else {
+            $channels['email']['error'] = 'Email channel disabled or member has no email address.';
         }
 
         // Send SMS
         if (($messagingSettings['sms_enabled'] ?? false) && $member->phone) {
             $result = $termiiService->sendSMS(
                 $member->phone,
-                $this->celebration->message_text
+                $this->celebration->message_text,
+                $smsIntegration['sender_id'] ?? null
             );
 
             $channels['sms'] = [
                 'sent' => $result['success'],
                 'sent_at' => now()->toDateTimeString(),
                 'provider_id' => $result['message_id'] ?? null,
+                'error' => $result['error'] ?? null,
             ];
+        } else {
+            $channels['sms']['error'] = 'SMS channel disabled or member has no phone number.';
         }
 
         // Send WhatsApp
@@ -104,23 +115,33 @@ class SendCelebrationMessages implements ShouldQueue
 
             $result = $termiiService->sendWhatsApp(
                 $member->phone,
-                $message
+                $message,
+                $whatsappIntegration['sender_id'] ?? null
             );
 
             $channels['whatsapp'] = [
                 'sent' => $result['success'],
                 'sent_at' => now()->toDateTimeString(),
                 'provider_id' => $result['message_id'] ?? null,
+                'error' => $result['error'] ?? null,
             ];
+        } else {
+            $channels['whatsapp']['error'] = 'WhatsApp channel disabled or member has no phone number.';
         }
+
+        $sentChannels = collect($channels)->filter(fn ($channel) => $channel['sent'] ?? false)->count();
+        $status = $sentChannels > 0 ? 'sent' : 'failed';
 
         // Update celebration status
         $this->celebration->update([
-            'status' => 'sent',
-            'sent_at' => now(),
+            'status' => $status,
+            'sent_at' => $sentChannels > 0 ? now() : null,
             'channels' => $channels,
         ]);
 
-        Log::info("Completed sending messages for {$member->full_name}");
+        Log::info("Completed sending messages for {$member->full_name}", [
+            'status' => $status,
+            'sent_channels' => $sentChannels,
+        ]);
     }
 }

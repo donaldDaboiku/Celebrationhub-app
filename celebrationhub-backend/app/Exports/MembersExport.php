@@ -39,6 +39,14 @@ class MembersExport implements FromQuery, WithHeadings, WithMapping
             $member->anniversary ? $member->anniversary->format('Y-m-d') : '',
             $member->email,
             $member->phone,
+            $member->address,
+            $member->city,
+            $member->state,
+            $member->country,
+            $member->zip,
+            $member->department,
+            $member->designation,
+            $member->unit,
             $member->photo_url,
         ];
     }
@@ -56,6 +64,14 @@ class MembersExport implements FromQuery, WithHeadings, WithMapping
             'anniversary',
             'email',
             'phone',
+            'address',
+            'city',
+            'state',
+            'country',
+            'zip',
+            'department',
+            'designation',
+            'unit',
             'photo_url',
         ];
     }

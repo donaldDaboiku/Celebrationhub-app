@@ -10,12 +10,13 @@ class Template extends Model
     use HasFactory;
 
     protected $fillable = [
+        'organization_id',
         'name',
         'type',
-        'content',
+        'description',
         'preview_url',
+        'background_url',
         'is_public',
-        'organization_id',
     ];
 
     protected $casts = [

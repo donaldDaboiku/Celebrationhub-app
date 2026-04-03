@@ -21,12 +21,12 @@ class TermiiService
     /**
      * Send SMS
      */
-    public function sendSMS(string $phone, string $message): array
+    public function sendSMS(string $phone, string $message, ?string $senderId = null): array
     {
         try {
             $response = Http::post("{$this->baseUrl}/sms/send", [
                 'to' => $this->normalizePhone($phone),
-                'from' => $this->senderId,
+                'from' => $senderId ?: $this->senderId,
                 'sms' => $message,
                 'type' => 'plain',
                 'channel' => 'generic',
@@ -44,6 +44,7 @@ class TermiiService
                 'success' => $response->successful(),
                 'message_id' => $result['message_id'] ?? null,
                 'response' => $result,
+                'error' => $response->successful() ? null : ($result['message'] ?? $result['error'] ?? 'SMS request failed'),
             ];
         } catch (\Exception $e) {
             Log::error('SMS sending failed', [
@@ -61,12 +62,12 @@ class TermiiService
     /**
      * Send WhatsApp
      */
-    public function sendWhatsApp(string $phone, string $message): array
+    public function sendWhatsApp(string $phone, string $message, ?string $senderId = null): array
     {
         try {
             $response = Http::post("{$this->baseUrl}/whatsapp/send", [
                 'to' => $this->normalizePhone($phone),
-                'from' => $this->senderId,
+                'from' => $senderId ?: $this->senderId,
                 'message' => $message,
                 'api_key' => $this->apiKey,
             ]);
@@ -82,6 +83,7 @@ class TermiiService
                 'success' => $response->successful(),
                 'message_id' => $result['message_id'] ?? null,
                 'response' => $result,
+                'error' => $response->successful() ? null : ($result['message'] ?? $result['error'] ?? 'WhatsApp request failed'),
             ];
         } catch (\Exception $e) {
             Log::error('WhatsApp sending failed', [

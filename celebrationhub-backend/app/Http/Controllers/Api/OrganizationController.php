@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class OrganizationController extends Controller
 {
@@ -43,7 +43,40 @@ class OrganizationController extends Controller
             'settings.branding' => 'sometimes|array',
             'settings.branding.primary_color' => 'sometimes|string',
             'settings.branding.secondary_color' => 'sometimes|string',
+            'settings.member_fields' => 'sometimes|array',
+            'settings.member_fields.department_label' => 'nullable|string|max:80',
+            'settings.member_fields.designation_label' => 'nullable|string|max:80',
+            'settings.member_fields.unit_label' => 'nullable|string|max:80',
             'settings.messaging' => 'sometimes|array',
+            'settings.messaging.email_enabled' => 'sometimes|boolean',
+            'settings.messaging.sms_enabled' => 'sometimes|boolean',
+            'settings.messaging.whatsapp_enabled' => 'sometimes|boolean',
+            'settings.messaging.primary_channel' => 'sometimes|string|in:email,sms,whatsapp',
+            'settings.integrations' => 'sometimes|array',
+            'settings.integrations.email' => 'sometimes|array',
+            'settings.integrations.email.mailer' => 'nullable|string|max:50',
+            'settings.integrations.email.host' => 'nullable|string|max:255',
+            'settings.integrations.email.port' => 'nullable|integer|min:1|max:65535',
+            'settings.integrations.email.username' => 'nullable|string|max:255',
+            'settings.integrations.email.password' => 'nullable|string|max:255',
+            'settings.integrations.email.encryption' => 'nullable|string|max:50',
+            'settings.integrations.email.from_address' => 'nullable|email',
+            'settings.integrations.email.from_name' => 'nullable|string|max:255',
+            'settings.integrations.sms' => 'sometimes|array',
+            'settings.integrations.sms.provider' => 'nullable|string|max:100',
+            'settings.integrations.sms.sender_id' => 'nullable|string|max:100',
+            'settings.integrations.whatsapp' => 'sometimes|array',
+            'settings.integrations.whatsapp.provider' => 'nullable|string|max:100',
+            'settings.integrations.whatsapp.sender_id' => 'nullable|string|max:100',
+            'settings.integrations.whatsapp.phone_number' => 'nullable|string|max:50',
+            'settings.socials' => 'sometimes|array',
+            'settings.socials.facebook_page_url' => 'nullable|string|max:255',
+            'settings.socials.instagram_handle' => 'nullable|string|max:255',
+            'settings.socials.x_handle' => 'nullable|string|max:255',
+            'settings.socials.youtube_url' => 'nullable|string|max:255',
+            'settings.socials.telegram_link' => 'nullable|string|max:255',
+            'settings.socials.tiktok_handle' => 'nullable|string|max:255',
+            'settings.socials.website_url' => 'nullable|string|max:255',
         ]);
 
         $organization = $request->user()->organization;
@@ -62,7 +95,7 @@ class OrganizationController extends Controller
         // Update settings (merge with existing)
         if (isset($validated['settings'])) {
             $currentSettings = $organization->settings ?? [];
-            $organization->settings = array_merge($currentSettings, $validated['settings']);
+            $organization->settings = array_replace_recursive($currentSettings, $validated['settings']);
         }
 
         $organization->save();
@@ -85,15 +118,25 @@ class OrganizationController extends Controller
 
         $organization = $request->user()->organization;
 
-        // Delete old logo if exists
-        if ($organization->logo_url) {
-            $oldPath = str_replace(asset('storage/'), '', $organization->logo_url);
-            Storage::disk('public')->delete($oldPath);
+        if (! is_dir(public_path('logos'))) {
+            mkdir(public_path('logos'), 0755, true);
         }
 
-        // Store new logo
-        $path = $request->file('logo')->store('logos', 'public');
-        $organization->logo_url = asset('storage/' . $path);
+        // Delete old logo if it points to the public logos folder.
+        if ($organization->logo_url) {
+            $oldPath = parse_url($organization->logo_url, PHP_URL_PATH);
+            $oldAbsolutePath = $oldPath ? public_path(ltrim($oldPath, '/')) : null;
+
+            if ($oldAbsolutePath && str_starts_with($oldAbsolutePath, public_path('logos')) && file_exists($oldAbsolutePath)) {
+                unlink($oldAbsolutePath);
+            }
+        }
+
+        $file = $request->file('logo');
+        $filename = 'org-' . $organization->id . '-' . Str::lower(Str::random(10)) . '.' . $file->getClientOriginalExtension();
+        $file->move(public_path('logos'), $filename);
+
+        $organization->logo_url = asset('logos/' . $filename);
         $organization->save();
 
         return response()->json([
@@ -101,6 +144,31 @@ class OrganizationController extends Controller
             'message' => 'Logo uploaded successfully',
             'data' => [
                 'logo_url' => $organization->logo_url,
+            ],
+        ]);
+    }
+
+    public function removeLogo(Request $request)
+    {
+        $organization = $request->user()->organization;
+
+        if ($organization->logo_url) {
+            $oldPath = parse_url($organization->logo_url, PHP_URL_PATH);
+            $oldAbsolutePath = $oldPath ? public_path(ltrim($oldPath, '/')) : null;
+
+            if ($oldAbsolutePath && str_starts_with($oldAbsolutePath, public_path('logos')) && file_exists($oldAbsolutePath)) {
+                unlink($oldAbsolutePath);
+            }
+        }
+
+        $organization->logo_url = null;
+        $organization->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Logo removed successfully',
+            'data' => [
+                'logo_url' => null,
             ],
         ]);
     }

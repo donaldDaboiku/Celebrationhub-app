@@ -1,380 +1,307 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { mockTemplates } from '@/lib/mockData';
-import Image from 'next/image'; 
+/* eslint-disable @next/next/no-img-element */
+
+import { useEffect, useMemo, useState } from 'react';
+import {
+    createTemplate,
+    deleteTemplate,
+    getTemplates,
+    setDefaultTemplate,
+    updateTemplate,
+} from '@/lib/api';
+
+const emptyForm = {
+    name: '',
+    type: 'birthday',
+    description: '',
+    preview_url: '',
+    background_url: '',
+};
+
+function TemplatePreview({ template, large = false }) {
+    const [imageFailed, setImageFailed] = useState(false);
+    const imageUrl = template.preview_url || template.background_url || '';
+    const accentClass = template.type === 'birthday' ? 'birthday' : 'anniversary';
+
+    return (
+        <div className={`preview-shell ${large ? 'large' : ''} ${accentClass}`}>
+            {imageUrl && !imageFailed && (
+                <img
+                    src={imageUrl}
+                    alt={template.name}
+                    onError={() => setImageFailed(true)}
+                />
+            )}
+            <div className="fallback">
+                <span className="fallback-type">{template.type}</span>
+                <strong>{template.name}</strong>
+                <p>{template.description || 'Celebration template preview'}</p>
+            </div>
+        </div>
+    );
+}
 
 export default function TemplateLibrary() {
-  const [templates, setTemplates] = useState([]);
-  const [activeTab, setActiveTab] = useState('birthday');
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [defaults, setDefaults] = useState({ birthday: 1, anniversary: 5 });
-  const [loading, setLoading] = useState(true);
+    const [templates, setTemplates] = useState([]);
+    const [defaults, setDefaults] = useState({ birthday: null, anniversary: null });
+    const [activeTab, setActiveTab] = useState('birthday');
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [selectedTemplate, setSelectedTemplate] = useState(null);
+    const [showForm, setShowForm] = useState(false);
+    const [editingTemplate, setEditingTemplate] = useState(null);
+    const [form, setForm] = useState(emptyForm);
+    const [message, setMessage] = useState({ type: '', text: '' });
 
- 
-useEffect(() => {
-  const loadTemplates = async () => {
-    try {
-      // For now, use mock data
-      setTimeout(() => {
-        setTemplates(mockTemplates);
-        setLoading(false);
-      }, 500);
-    } catch (error) {
-      console.error('Failed to load templates:', error);
-      setLoading(false);
-    }
-  };
-   
-    loadTemplates();
-  }, []);
+    const loadTemplates = async () => {
+        setLoading(true);
+        setMessage({ type: '', text: '' });
 
-  const filteredTemplates = templates.filter(t => t.type === activeTab);
+        try {
+            const response = await getTemplates();
+            setTemplates(response.templates || []);
+            setDefaults(response.currentDefaults || { birthday: null, anniversary: null });
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message || 'Failed to load templates.' });
+        } finally {
+            setLoading(false);
+        }
+    };
 
-  const handleSetDefault = async (templateId) => {
-    try {
-      // Later: await fetchAPI(`/templates/${templateId}/set-default`, {
-      //   method: 'POST',
-      //   body: JSON.stringify({ type: activeTab })
-      // });
-      
-      setDefaults({ ...defaults, [activeTab]: templateId });
-      alert(`Template set as default for ${activeTab}s`);
-    } catch (error) {
-      console.error('Failed to set default:', error);
-    }
-  };
+    useEffect(() => {
+        loadTemplates();
+    }, []);
 
-  if (loading) {
-    return <div style={{ padding: '40px', textAlign: 'center' }}>Loading templates...</div>;
-  }
+    const filteredTemplates = useMemo(
+        () => templates.filter((template) => template.type === activeTab),
+        [templates, activeTab]
+    );
 
-  return (
-    <div className="template-library">
-      <div className="header">
-        <h1>Template Library</h1>
-        <p>Choose and customize templates for your celebrations</p>
-      </div>
+    const openCreateForm = () => {
+        setEditingTemplate(null);
+        setForm({ ...emptyForm, type: activeTab });
+        setShowForm(true);
+    };
 
-      {/* Tabs */}
-      <div className="tabs">
-        <button
-          className={`tab ${activeTab === 'birthday' ? 'active' : ''}`}
-          onClick={() => setActiveTab('birthday')}
-        >
-          🎂 Birthday Templates
-        </button>
-        <button
-          className={`tab ${activeTab === 'anniversary' ? 'active' : ''}`}
-          onClick={() => setActiveTab('anniversary')}
-        >
-          💍 Anniversary Templates
-        </button>
-      </div>
+    const openEditForm = (template) => {
+        setEditingTemplate(template);
+        setForm({
+            name: template.name || '',
+            type: template.type || activeTab,
+            description: template.description || '',
+            preview_url: template.preview_url || '',
+            background_url: template.background_url || '',
+        });
+        setShowForm(true);
+    };
 
-      {/* Template Grid */}
-      <div className="template-grid">
-        {filteredTemplates.map(template => (
-          <div key={template.id} className="template-card">
-            <div className="template-preview" onClick={() => setSelectedTemplate(template)}>
-              <Image
-                src={template.previewUrl}
-                alt={template.name}
-                fill
-                sizes="(max-width: 768px) 100vw, 33vw"
-                style={{ objectFit: 'cover' }}
-              />
-              <div className="preview-overlay">
-                <button className="preview-btn">Preview</button>
-              </div>
+    const closeForm = () => {
+        setShowForm(false);
+        setEditingTemplate(null);
+        setForm(emptyForm);
+    };
+
+    const handleSave = async (event) => {
+        event.preventDefault();
+        setSaving(true);
+        setMessage({ type: '', text: '' });
+
+        try {
+            if (editingTemplate) {
+                await updateTemplate(editingTemplate.id, form);
+                setMessage({ type: 'success', text: 'Template updated successfully.' });
+            } else {
+                await createTemplate(form);
+                setMessage({ type: 'success', text: 'Template created successfully.' });
+            }
+
+            closeForm();
+            await loadTemplates();
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message || 'Failed to save template.' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDelete = async (template) => {
+        if (!window.confirm(`Delete "${template.name}"?`)) {
+            return;
+        }
+
+        try {
+            await deleteTemplate(template.id);
+            setMessage({ type: 'success', text: 'Template deleted successfully.' });
+            await loadTemplates();
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message || 'Failed to delete template.' });
+        }
+    };
+
+    const handleSetDefault = async (template) => {
+        try {
+            await setDefaultTemplate(template.id, template.type);
+            setDefaults((current) => ({ ...current, [template.type]: template.id }));
+            setMessage({ type: 'success', text: `${template.name} is now the default ${template.type} template.` });
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message || 'Failed to set the default template.' });
+        }
+    };
+
+    return (
+        <div className="template-library">
+            <div className="card header">
+                <div>
+                    <p className="eyebrow">Design</p>
+                    <h1>Template Library</h1>
+                    <p>Choose a default design, and create your own organization-specific celebration templates.</p>
+                </div>
+                <button className="primary" onClick={openCreateForm}>Add Custom Template</button>
             </div>
-            <div className="template-info">
-              <h3>{template.name}</h3>
-              <p>{template.description}</p>
-              {defaults[activeTab] === template.id ? (
-                <div className="default-badge">✓ Current Default</div>
-              ) : (
-                <button
-                  className="set-default-btn"
-                  onClick={() => handleSetDefault(template.id)}
-                >
-                  Set as Default
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
 
-      {/* Preview Modal */}
-      {selectedTemplate && (
-        <div className="modal-overlay" onClick={() => setSelectedTemplate(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => setSelectedTemplate(null)}>×</button>
-            <h2>{selectedTemplate.name}</h2>
-            <div className="modal-image">
-              <Image
-                src={selectedTemplate.previewUrl}
-                alt={selectedTemplate.name}
-                fill
-                sizes="(max-width: 768px) 100vw, 600px"
-                style={{ objectFit: 'cover' }}
-              />
+            <div className="tabs">
+                <button className={activeTab === 'birthday' ? 'active' : ''} onClick={() => setActiveTab('birthday')}>Birthday</button>
+                <button className={activeTab === 'anniversary' ? 'active' : ''} onClick={() => setActiveTab('anniversary')}>Anniversary</button>
             </div>
-            <p>{selectedTemplate.description}</p>
-            <button
-              className="modal-action-btn"
-              onClick={() => {
-                handleSetDefault(selectedTemplate.id);
-                setSelectedTemplate(null);
-              }}
-            >
-              Set as Default
-            </button>
-          </div>
+
+            {message.text && <div className={`notice ${message.type}`}>{message.text}</div>}
+
+            {loading ? (
+                <div className="card empty">Loading templates...</div>
+            ) : filteredTemplates.length === 0 ? (
+                <div className="card empty">No templates available for this category yet.</div>
+            ) : (
+                <div className="grid">
+                    {filteredTemplates.map((template) => (
+                        <article key={template.id} className="card template-card">
+                            <button className="preview" onClick={() => setSelectedTemplate(template)}>
+                                <TemplatePreview template={template} />
+                            </button>
+
+                            <div className="template-body">
+                                <div className="template-top">
+                                    <div>
+                                        <h2>{template.name}</h2>
+                                        <p>{template.description || 'No description added yet.'}</p>
+                                    </div>
+                                    <div className="badge-row">
+                                        <span className={`badge ${template.is_public ? 'public' : 'custom'}`}>
+                                            {template.is_public ? 'System' : 'Custom'}
+                                        </span>
+                                        {defaults[template.type] === template.id && <span className="badge default">Default</span>}
+                                    </div>
+                                </div>
+
+                                <div className="actions">
+                                    <button className="ghost" onClick={() => handleSetDefault(template)}>Set Default</button>
+                                    {!template.is_public && <button className="ghost" onClick={() => openEditForm(template)}>Edit</button>}
+                                    {!template.is_public && <button className="danger" onClick={() => handleDelete(template)}>Delete</button>}
+                                </div>
+                            </div>
+                        </article>
+                    ))}
+                </div>
+            )}
+
+            {selectedTemplate && (
+                <div className="overlay" onClick={() => setSelectedTemplate(null)}>
+                    <div className="card modal" onClick={(event) => event.stopPropagation()}>
+                        <div className="modal-head">
+                            <div>
+                                <h2>{selectedTemplate.name}</h2>
+                                <p>{selectedTemplate.description || 'No description added yet.'}</p>
+                            </div>
+                            <button className="ghost close" onClick={() => setSelectedTemplate(null)}>×</button>
+                        </div>
+                        <div className="preview large">
+                            <TemplatePreview template={selectedTemplate} large />
+                        </div>
+                        <div className="actions">
+                            <button className="primary" onClick={() => handleSetDefault(selectedTemplate)}>Set as Default</button>
+                            {!selectedTemplate.is_public && <button className="ghost" onClick={() => openEditForm(selectedTemplate)}>Edit Template</button>}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showForm && (
+                <div className="overlay" onClick={closeForm}>
+                    <div className="card modal" onClick={(event) => event.stopPropagation()}>
+                        <div className="modal-head">
+                            <div>
+                                <h2>{editingTemplate ? 'Edit template' : 'Create template'}</h2>
+                                <p>Use image URLs for quick previews while we keep the template system lightweight.</p>
+                            </div>
+                            <button className="ghost close" onClick={closeForm}>×</button>
+                        </div>
+                        <form className="form-grid" onSubmit={handleSave}>
+                            <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Template name" required />
+                            <select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>
+                                <option value="birthday">Birthday</option>
+                                <option value="anniversary">Anniversary</option>
+                            </select>
+                            <textarea className="wide" rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Short description" />
+                            <input className="wide" value={form.preview_url} onChange={(event) => setForm({ ...form, preview_url: event.target.value })} placeholder="Preview image URL" />
+                            <input className="wide" value={form.background_url} onChange={(event) => setForm({ ...form, background_url: event.target.value })} placeholder="Background image URL" />
+                            <div className="actions wide">
+                                <button type="button" className="ghost" onClick={closeForm}>Cancel</button>
+                                <button type="submit" className="primary" disabled={saving}>{saving ? 'Saving...' : editingTemplate ? 'Save Changes' : 'Create Template'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            <style jsx>{`
+                .template-library { display: grid; gap: 20px; }
+                .card { background: white; border: 1px solid #e5e7eb; border-radius: 24px; box-shadow: 0 16px 45px rgba(15, 23, 42, 0.06); }
+                .header, .template-card, .modal { padding: 24px; }
+                .header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; background: linear-gradient(135deg, rgba(37,99,235,.08), rgba(4,120,87,.1)); }
+                .eyebrow { margin-bottom: 8px; color: #047857; font-size: 12px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; }
+                h1, h2 { margin-bottom: 8px; }
+                p { color: #64748b; }
+                .tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+                .tabs button, .primary, .ghost, .danger { border: none; border-radius: 999px; padding: 12px 16px; font-size: 14px; font-weight: 700; cursor: pointer; }
+                .tabs button { background: #e2e8f0; color: #334155; }
+                .tabs button.active { background: #0f766e; color: white; }
+                .primary { background: linear-gradient(135deg, #0f766e, #1d4ed8); color: white; }
+                .ghost { background: #eff6ff; color: #1d4ed8; }
+                .danger { background: #fef2f2; color: #dc2626; }
+                .notice { padding: 14px 16px; border-radius: 18px; font-weight: 600; }
+                .notice.success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+                .notice.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+                .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+                .template-card { display: grid; gap: 16px; }
+                .preview { width: 100%; padding: 0; background: #f8fafc; border-radius: 18px; overflow: hidden; border: none; cursor: pointer; }
+                .preview :global(.preview-shell) { position: relative; width: 100%; min-height: 220px; display: grid; align-items: end; overflow: hidden; }
+                .preview.large :global(.preview-shell) { min-height: 360px; }
+                .preview :global(.preview-shell img) { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+                .preview :global(.fallback) { position: relative; z-index: 1; display: grid; gap: 6px; padding: 22px; color: white; background: linear-gradient(180deg, rgba(15,23,42,.08), rgba(15,23,42,.68)); min-height: 220px; align-content: end; text-align: left; }
+                .preview.large :global(.fallback) { min-height: 360px; }
+                .preview :global(.fallback strong) { font-size: 24px; line-height: 1.1; }
+                .preview :global(.fallback p) { color: rgba(255,255,255,.84); }
+                .preview :global(.fallback-type) { display: inline-flex; width: fit-content; padding: 6px 10px; border-radius: 999px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.16); backdrop-filter: blur(4px); }
+                .preview :global(.preview-shell.birthday) { background: linear-gradient(135deg, #1d4ed8, #f97316); }
+                .preview :global(.preview-shell.anniversary) { background: linear-gradient(135deg, #0f766e, #7c3aed); }
+                .template-top, .actions, .badge-row, .modal-head { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; }
+                .template-top, .modal-head { flex-wrap: wrap; }
+                .actions { flex-wrap: wrap; }
+                .badge { display: inline-flex; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+                .badge.public { background: #eff6ff; color: #1d4ed8; }
+                .badge.custom { background: #fff7ed; color: #c2410c; }
+                .badge.default { background: #ecfdf5; color: #047857; }
+                .empty { padding: 28px; text-align: center; color: #64748b; }
+                .overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, .6); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 1000; }
+                .modal { width: min(780px, 100%); display: grid; gap: 16px; }
+                .close { width: 40px; height: 40px; padding: 0; font-size: 24px; }
+                .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+                .form-grid input, .form-grid textarea, .form-grid select { width: 100%; padding: 12px 14px; border: 1px solid #dbe4f0; border-radius: 14px; font-size: 14px; }
+                .wide { grid-column: 1 / -1; }
+                @media (max-width: 900px) {
+                    .header, .template-top, .actions, .modal-head { flex-direction: column; align-items: stretch; }
+                    .form-grid { grid-template-columns: 1fr; }
+                }
+            `}</style>
         </div>
-      )}
-
-      <style jsx>{`
-        .template-library {
-          padding: 24px;
-          max-width: 1200px;
-          margin: 0 auto;
-        }
-
-        .header {
-          margin-bottom: 32px;
-        }
-
-        h1 {
-          font-family: Georgia, serif;
-          font-size: 32px;
-          margin-bottom: 8px;
-        }
-
-        .header p {
-          color: #666;
-        }
-
-        .tabs {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 32px;
-          border-bottom: 2px solid #f0f0f0;
-        }
-
-        .tab {
-          background: none;
-          border: none;
-          padding: 12px 24px;
-          font-size: 16px;
-          cursor: pointer;
-          color: #666;
-          border-bottom: 3px solid transparent;
-          transition: all 0.2s;
-        }
-
-        .tab:hover {
-          color: #1a1a1a;
-        }
-
-        .tab.active {
-          color: #4f46e5;
-          border-bottom-color: #4f46e5;
-        }
-
-        .template-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-          gap: 24px;
-        }
-
-        .template-card {
-          background: white;
-          border-radius: 12px;
-          overflow: hidden;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-          transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .template-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        }
-
-        .template-preview {
-          position: relative;
-          cursor: pointer;
-          aspect-ratio: 3/2;
-          overflow: hidden;
-        }
-
-        .template-preview :global(img) {
-          object-fit: cover;
-        }
-
-        .preview-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.5);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          opacity: 0;
-          transition: opacity 0.2s;
-        }
-
-        .template-preview:hover .preview-overlay {
-          opacity: 1;
-        }
-
-        .preview-btn {
-          background: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 600;
-        }
-
-        .template-info {
-          padding: 20px;
-        }
-
-        .template-info h3 {
-          font-size: 18px;
-          margin-bottom: 8px;
-        }
-
-        .template-info p {
-          font-size: 14px;
-          color: #666;
-          margin-bottom: 16px;
-        }
-
-        .default-badge {
-          background: #16a34a;
-          color: white;
-          padding: 8px 16px;
-          border-radius: 6px;
-          font-size: 14px;
-          display: inline-block;
-        }
-
-        .set-default-btn {
-          background: #4f46e5;
-          color: white;
-          border: none;
-          padding: 10px 20px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 14px;
-          transition: background 0.2s;
-        }
-
-        .set-default-btn:hover {
-          background: #4338ca;
-        }
-
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.7);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          animation: fadeIn 0.2s;
-        }
-
-        .modal {
-          background: white;
-          border-radius: 16px;
-          padding: 32px;
-          max-width: 600px;
-          max-height: 90vh;
-          overflow-y: auto;
-          position: relative;
-          animation: slideUp 0.3s;
-        }
-
-        .close-btn {
-          position: absolute;
-          top: 16px;
-          right: 16px;
-          background: none;
-          border: none;
-          font-size: 32px;
-          cursor: pointer;
-          color: #666;
-        }
-
-        .modal h2 {
-          font-family: Georgia, serif;
-          margin-bottom: 16px;
-        }
-
-        .modal-image {
-          position: relative;
-          width: 100%;
-          aspect-ratio: 3/2;
-          border-radius: 8px;
-          overflow: hidden;
-          margin-bottom: 16px;
-        }
-
-        .modal p {
-          color: #666;
-          margin-bottom: 24px;
-        }
-
-        .modal-action-btn {
-          background: #4f46e5;
-          color: white;
-          border: none;
-          padding: 12px 32px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 16px;
-          width: 100%;
-        }
-
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-
-        @keyframes slideUp {
-          from {
-            transform: translateY(20px);
-            opacity: 0;
-          }
-          to {
-            transform: translateY(0);
-            opacity: 1;
-          }
-        }
-
-        @media (max-width: 768px) {
-          .template-library {
-            padding: 16px;
-          }
-
-          .template-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .modal {
-            margin: 16px;
-            padding: 24px;
-          }
-        }
-      `}</style>
-    </div>
-  );
+    );
 }
