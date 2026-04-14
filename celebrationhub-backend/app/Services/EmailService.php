@@ -25,7 +25,7 @@ class EmailService
 
             Mail::mailer($mailer)->send('emails.celebration', [
                 'name' => $name,
-                'message' => $message,
+                'messageText' => $message,
                 'designUrl' => $designUrl,
             ], function ($mail) use ($to, $subject) {
                 $mail->to($to)

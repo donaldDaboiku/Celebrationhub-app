@@ -63,7 +63,7 @@
         <div class="content">
             <p>Dear {{ $name }},</p>
             
-            <p>{!! nl2br(e($message)) !!}</p>
+            <p>{!! nl2br(e($messageText)) !!}</p>
             
             @if($designUrl)
             <img src="{{ $designUrl }}" alt="Celebration Design" class="design-image">
