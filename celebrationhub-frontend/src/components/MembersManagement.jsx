@@ -673,11 +673,11 @@ export default function MembersManagement() {
                 .blue { background: #eff6ff; color: #1d4ed8; }
                 .amber { background: #fff7ed; color: #c2410c; }
                 .pagination { justify-content: space-between; margin-top: 16px; }
-                .overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, .6); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 1000; }
-                .modal { width: min(860px, 100%); }
-                .details-modal { width: min(980px, 100%); max-height: calc(100vh - 48px); overflow: auto; }
+                .overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, .6); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 1000; overflow-y: auto; }
+                .modal { width: min(860px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; margin: auto 0; }
+                .details-modal { width: min(980px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; margin: auto 0; }
                 .close { width: 40px; height: 40px; padding: 0; font-size: 24px; }
-                .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+                .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; grid-auto-rows: minmax(min-content, max-content); }
                 .details-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
                 .detail-card strong { display: block; color: #0f172a; margin-bottom: 8px; }
                 .detail-card p { margin: 0; color: #64748b; line-height: 1.6; }
@@ -685,12 +685,12 @@ export default function MembersManagement() {
                 .detail-pills { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
                 .profile-details { margin-top: 0; }
                 .full { grid-column: 1 / -1; }
-                .field { display: flex; flex-direction: column; gap: 8px; }
+                .field { display: flex; flex-direction: column; gap: 8px; width: 100%; }
                 .field span { color: #334155; font-size: 13px; font-weight: 700; }
                 .wide { grid-column: 1 / -1; }
-                .check { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border: 1px solid #dbe4f0; border-radius: 14px; color: #334155; }
-                .check input { width: auto; }
-                .actions { justify-content: flex-end; }
+                .check { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border: 1px solid #dbe4f0; border-radius: 14px; color: #334155; width: 100%; }
+                .check input { width: auto; margin: 0; }
+                .actions { justify-content: flex-end; width: 100%; }
                 @media (max-width: 900px) {
                     .page-head, .toolbar, .row, .pagination, .modal-head, .actions, .profile-summary, .upload-row, .actions-inline { flex-direction: column; align-items: stretch; }
                     .details-layout,
