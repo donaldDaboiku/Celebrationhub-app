@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { mockCredits } from '@/lib/mockData';
+import { getCredits, purchaseCredits } from '@/lib/api';
 
 export default function SMSCreditManagement() {
   const [credits, setCredits] = useState(null);
@@ -36,36 +36,32 @@ export default function SMSCreditManagement() {
   ];
  
 useEffect(() => {
-  const loadData = async () => {
-    try {
-      // For now, use mock data
-      setTimeout(() => {
-        setCredits(mockCredits.balance);
-        setTransactions(mockCredits.transactions);
+    const loadData = async () => {
+      try {
+        const response = await getCredits();
+        setCredits(response.data.balance);
+        setTransactions(response.data.transactions || []);
+      } catch (error) {
+        console.error('Failed to load credits:', error);
+      } finally {
         setLoading(false);
-      }, 500);
-    } catch (error) {
-      console.error('Failed to load credits:', error);
-      setLoading(false);
-    }
-  };
-  
+      }
+    };
+
     loadData();
   }, []);
 
   const handlePurchase = async (packageId) => {
     setPurchasing(true);
     try {
-      // Later: const response = await fetchAPI('/credits/purchase', {
-      //   method: 'POST',
-      //   body: JSON.stringify({ package: packageId })
-      // });
-      // window.location.href = response.paymentUrl;
-      
-      alert(`Initiating payment for ${packageId} credits package...`);
-      setPurchasing(false);
+      const response = await purchaseCredits(packageId);
+      if (response.data?.paymentUrl) {
+        window.location.href = response.data.paymentUrl;
+      }
     } catch (error) {
       console.error('Failed to initiate purchase:', error);
+      alert(error.message || 'Failed to initiate purchase. Please try again.');
+    } finally {
       setPurchasing(false);
     }
   };
