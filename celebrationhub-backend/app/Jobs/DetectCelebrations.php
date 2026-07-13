@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
-use App\Models\Member;
 use App\Models\Celebration;
+use App\Models\Member;
+use App\Models\Organization;
+use App\Support\MemberDateFilters;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -18,52 +20,73 @@ class DetectCelebrations implements ShouldQueue
 
     public function handle(): void
     {
-        Log::info('Running celebration detection...');
+        Log::info('Running org-aware celebration detection...');
 
-        $today = Carbon::today();
-        $day   = $today->day;
-        $month = $today->month;
-
-        // Use generated virtual columns (indexed) instead of DAY()/MONTH() functions
-        $birthdayMembers = Member::active()
-            ->approved()
-            ->whereNotNull('birthday')
-            ->where('birthday_day', $day)
-            ->where('birthday_month', $month)
-            ->with('organization')
-            ->get();
-
-        Log::info("Found {$birthdayMembers->count()} birthdays today");
-
-        foreach ($birthdayMembers as $member) {
-            /** @var Member $member */
-            $this->scheduleCelebration($member, 'birthday');
-        }
-
-        $anniversaryMembers = Member::active()
-            ->approved()
-            ->whereNotNull('anniversary')
-            ->where('anniversary_day', $day)
-            ->where('anniversary_month', $month)
-            ->with('organization')
-            ->get();
-
-        Log::info("Found {$anniversaryMembers->count()} anniversaries today");
-
-        foreach ($anniversaryMembers as $member) {
-            /** @var Member $member */
-            $this->scheduleCelebration($member, 'anniversary');
-        }
+        Organization::query()
+            ->select(['id', 'settings'])
+            ->each(fn (Organization $organization) => $this->processOrganization($organization));
 
         Log::info('Celebration detection completed');
     }
 
-    protected function scheduleCelebration(Member $member, string $type): void
+    protected function processOrganization(Organization $organization): void
     {
-        // Skip if already scheduled today
+        $settings = $organization->settings ?? [];
+        $timezone = $settings['timezone'] ?? 'Africa/Lagos';
+        $sendTime = $settings['send_time'] ?? '06:00';
+        $localNow = Carbon::now($timezone);
+
+        if (! $this->isDetectionWindow($localNow, $sendTime)) {
+            return;
+        }
+
+        $day = $localNow->day;
+        $month = $localNow->month;
+
+        $birthdayMembers = Member::where('organization_id', $organization->id)
+            ->active()
+            ->approved()
+            ->whereNotNull('birthday')
+            ->tap(fn ($query) => MemberDateFilters::whereMonthDay($query, 'birthday', $day, $month))
+            ->get();
+
+        foreach ($birthdayMembers as $member) {
+            $member->setRelation('organization', $organization);
+            $this->scheduleCelebration($member, 'birthday', $localNow, $timezone, $sendTime);
+        }
+
+        $anniversaryMembers = Member::where('organization_id', $organization->id)
+            ->active()
+            ->approved()
+            ->whereNotNull('anniversary')
+            ->tap(fn ($query) => MemberDateFilters::whereMonthDay($query, 'anniversary', $day, $month))
+            ->get();
+
+        foreach ($anniversaryMembers as $member) {
+            $member->setRelation('organization', $organization);
+            $this->scheduleCelebration($member, 'anniversary', $localNow, $timezone, $sendTime);
+        }
+
+        Log::info("Processed org {$organization->id}: {$birthdayMembers->count()} birthdays, {$anniversaryMembers->count()} anniversaries");
+    }
+
+    protected function isDetectionWindow(Carbon $localNow, string $sendTime): bool
+    {
+        [$sendHour] = array_pad(explode(':', $sendTime), 2, '0');
+
+        return (int) $localNow->format('G') === (int) $sendHour;
+    }
+
+    protected function scheduleCelebration(
+        Member $member,
+        string $type,
+        Carbon $localNow,
+        string $timezone,
+        string $sendTime
+    ): void {
         $exists = Celebration::where('member_id', $member->id)
             ->where('type', $type)
-            ->whereDate('scheduled_for', Carbon::today())
+            ->whereDate('scheduled_for', $localNow->toDateString())
             ->exists();
 
         if ($exists) {
@@ -71,28 +94,25 @@ class DetectCelebrations implements ShouldQueue
             return;
         }
 
-        $settings    = $member->organization->settings ?? [];
-        $sendTime    = $settings['send_time'] ?? '06:00';
-        $timezone    = $settings['timezone'] ?? 'Africa/Lagos';
-
-        $scheduledFor = Carbon::today($timezone)->setTimeFromTimeString($sendTime);
+        [$sendHour, $sendMinute] = array_pad(explode(':', $sendTime), 2, '0');
+        $scheduledFor = $localNow->copy()->setTime((int) $sendHour, (int) $sendMinute, 0);
 
         if ($scheduledFor->isPast()) {
-            $scheduledFor = Carbon::now();
+            $scheduledFor = $localNow->copy();
         }
 
         $celebration = Celebration::create([
-            'member_id'       => $member->id,
+            'member_id' => $member->id,
             'organization_id' => $member->organization_id,
-            'type'            => $type,
-            'status'          => 'pending',
-            'scheduled_for'   => $scheduledFor,
-            'message_text'    => $this->generateMessage($member, $type),
+            'type' => $type,
+            'status' => 'pending',
+            'scheduled_for' => $scheduledFor,
+            'message_text' => $this->generateMessage($member, $type),
         ]);
 
         SendCelebrationMessages::dispatch($celebration)->delay($scheduledFor);
 
-        Log::info("Scheduled {$type} for {$member->full_name} at {$scheduledFor}");
+        Log::info("Scheduled {$type} for {$member->full_name} at {$scheduledFor} ({$timezone})");
     }
 
     protected function generateMessage(Member $member, string $type): string
@@ -102,10 +122,10 @@ class DetectCelebrations implements ShouldQueue
 
         if ($type === 'birthday') {
             $template = $messages['birthday_template']
-                ?? "🎉 Happy Birthday {$member->full_name}!\n\nMay God bless you with long life, good health, and prosperity.\n\nFrom your church family 💙";
+                ?? "Happy Birthday {$member->full_name}! May God bless you with long life, good health, and prosperity.";
         } else {
             $template = $messages['anniversary_template']
-                ?? "💍 Happy Wedding Anniversary {$member->full_name}!\n\nMay your home continue to be blessed with love, joy, and peace.\n\nFrom your church family 💙";
+                ?? "Happy Wedding Anniversary {$member->full_name}! May your home continue to be blessed with love, joy, and peace.";
         }
 
         return str_replace(

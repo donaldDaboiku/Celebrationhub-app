@@ -16,6 +16,8 @@ import {
     sendCampaign,
     sendCelebrationNow,
 } from '@/lib/api';
+import { getCreditWarningCopy, shouldShowCreditWarning } from '@/lib/credits';
+import { useSmsCredits } from '@/hooks/useSmsCredits';
 
 const initialManualForm = { member_id: '', type: 'birthday', message_text: '', send_now: true, scheduled_for: '' };
 const initialCampaignForm = { name: '', message: '', type: 'sms', send_mode: 'all', member_ids: [], scheduled_for: '' };
@@ -59,6 +61,10 @@ export default function MessageCenter() {
         sms: { enabled: false, ready: false },
         whatsapp: { enabled: false, ready: false },
     });
+    const { balance: smsCredits, status: creditStatus } = useSmsCredits();
+    const smsCreditWarning = channelStatus.sms.enabled && shouldShowCreditWarning(creditStatus)
+        ? getCreditWarningCopy(smsCredits, creditStatus)
+        : null;
 
     const setFeedback = (type, text) => setMessage({ type, text });
 
@@ -319,6 +325,13 @@ export default function MessageCenter() {
                     </span>
                 </div>
             </div>
+
+            {smsCreditWarning && (
+                <div className={`notice credit-warning ${creditStatus}`} role="alert">
+                    <strong>{smsCreditWarning.title}</strong>
+                    <span>{smsCreditWarning.message}</span>
+                </div>
+            )}
 
             {message.text && <div className={`notice ${message.type}`}>{message.text}</div>}
             <div className="split">
@@ -592,6 +605,10 @@ export default function MessageCenter() {
                 .history-item { padding: 16px; border: 1px solid #eef2f7; border-radius: 18px; }
                 .history-item.active { border-color: rgba(29, 78, 216, 0.3); }
                 .notice { padding: 14px 16px; border-radius: 18px; font-weight: 600; }
+                .notice.credit-warning { display: grid; gap: 4px; font-weight: 500; }
+                .notice.credit-warning strong { font-weight: 700; }
+                .notice.credit-warning.low { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; }
+                .notice.credit-warning.critical { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
                 .notice.success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
                 .notice.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
                 .pill { display: inline-flex; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: capitalize; }

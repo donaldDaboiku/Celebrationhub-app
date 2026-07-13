@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AnalyticsController;
+use App\Http\Controllers\CreditController;
 use App\Http\Controllers\TemplateController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CelebrationController;
@@ -29,7 +30,7 @@ Route::get('/health', function () {
 });
 
 // Webhook route (must be public for external service)
-Route::post('/credits/webhook', 'App\\Http\\Controllers\\CreditController@paystackWebhook');
+Route::post('/credits/webhook', [CreditController::class, 'paystackWebhook']);
 
 /*
 |--------------------------------------------------------------------------
@@ -91,7 +92,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/templates/{id}', [TemplateController::class, 'destroy']);
 
     // --- Credits ---
-    Route::get('/credits/balance', 'App\\Http\\Controllers\\CreditController@balance');
-    Route::get('/credits/transactions', 'App\\Http\\Controllers\\CreditController@transactions');
-    Route::post('/credits/purchase', 'App\\Http\\Controllers\\CreditController@purchase');
+    Route::get('/credits', [CreditController::class, 'index']);
+    Route::get('/credits/balance', [CreditController::class, 'balance']);
+    Route::get('/credits/transactions', [CreditController::class, 'transactions']);
+    Route::post('/credits/purchase', [CreditController::class, 'purchase']);
 });

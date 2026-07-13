@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use App\Jobs\SendCelebrationMessages;
 use App\Models\Celebration;
@@ -19,10 +20,7 @@ class CelebrationController extends Controller
             ->latest()
             ->paginate(20);
 
-        return response()->json([
-            'success' => true,
-            'data' => $celebrations,
-        ]);
+        return ApiResponse::success($celebrations);
     }
 
     public function store(Request $request)
@@ -56,29 +54,18 @@ class CelebrationController extends Controller
             SendCelebrationMessages::dispatchSync($celebration);
             $celebration->refresh();
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Message sent immediately',
-                'data' => $celebration,
-            ], 201);
+            return ApiResponse::success($celebration, 'Message sent immediately', 201);
         }
 
         SendCelebrationMessages::dispatch($celebration)->delay($scheduledFor);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Celebration queued successfully',
-            'data' => $celebration,
-        ], 201);
+        return ApiResponse::success($celebration, 'Celebration queued successfully', 201);
     }
 
     public function resend(Request $request, Celebration $celebration)
     {
         if ($celebration->organization_id !== $request->user()->organization_id) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Celebration not found',
-            ], 404);
+            return ApiResponse::error('Celebration not found', 404);
         }
 
         $freshCelebration = Celebration::create([
@@ -92,11 +79,10 @@ class CelebrationController extends Controller
 
         SendCelebrationMessages::dispatchSync($freshCelebration);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Celebration resent successfully',
-            'data' => $freshCelebration->fresh('member:id,first_name,last_name,title'),
-        ]);
+        return ApiResponse::success(
+            $freshCelebration->fresh('member:id,first_name,last_name,title'),
+            'Celebration resent successfully'
+        );
     }
 
     private function generateMessage(Member $member, string $type): string

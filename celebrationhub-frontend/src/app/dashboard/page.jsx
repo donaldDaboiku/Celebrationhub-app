@@ -10,6 +10,9 @@ import MembersManagement from '@/components/MembersManagement';
 import OrganizationSettings from '@/components/OrganizationSettings';
 import TemplateLibrary from '@/components/TemplateLibrary';
 import SMSCreditManagement from '@/components/SMSCreditManagement';
+import LowCreditBanner from '@/components/LowCreditBanner';
+import { shouldShowCreditWarning } from '@/lib/credits';
+import { useSmsCredits } from '@/hooks/useSmsCredits';
 
 export default function DashboardPage() {
     const router = useRouter();
@@ -27,6 +30,8 @@ export default function DashboardPage() {
     const [authenticated, setAuthenticated] = useState(false);
     const [user, setUser] = useState(null);
     const [organization, setOrganization] = useState(null);
+    const { status: creditStatus } = useSmsCredits();
+    const showCreditNavBadge = shouldShowCreditWarning(creditStatus);
 
     useEffect(() => {
         const nextAuthenticated = isAuthenticated();
@@ -112,6 +117,7 @@ export default function DashboardPage() {
                             onClick={() => handleSelectView(id)}
                         >
                             {label}
+                            {id === 'credits' && showCreditNavBadge && <span className="nav-alert-dot" aria-label="Low SMS credits" />}
                         </button>
                     ))}
                 </div>
@@ -179,6 +185,7 @@ export default function DashboardPage() {
                             onClick={() => handleSelectView(id)}
                         >
                             {label}
+                            {id === 'credits' && showCreditNavBadge && <span className="nav-alert-dot" aria-label="Low SMS credits" />}
                         </button>
                     ))}
                 </div>
@@ -187,6 +194,10 @@ export default function DashboardPage() {
             </aside>
 
             <main className="main">
+                <LowCreditBanner
+                    hidden={view === 'credits'}
+                    onTopUp={() => handleSelectView('credits')}
+                />
                 {view === 'analytics' && <AnalyticsDashboard />}
                 {view === 'members' && <MembersManagement />}
                 {view === 'messages' && <MessageCenter />}
@@ -220,6 +231,18 @@ export default function DashboardPage() {
                 }
                 .nav-links button:hover { background: #f1f5f9; color: #0f172a; }
                 .nav-links button.active { background: linear-gradient(135deg, #1d4ed8, #f97316); color: white; box-shadow: 0 10px 20px rgba(29,78,216,0.18); }
+                .nav-links button, .drawer-links button { position: relative; }
+                .nav-alert-dot {
+                    position: absolute;
+                    top: 8px;
+                    right: 8px;
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 999px;
+                    background: #ef4444;
+                    box-shadow: 0 0 0 2px white;
+                }
+                .nav-links button.active .nav-alert-dot { box-shadow: 0 0 0 2px rgba(255,255,255,0.35); }
                 .nav-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
                 .menu-toggle {
                     display: none;

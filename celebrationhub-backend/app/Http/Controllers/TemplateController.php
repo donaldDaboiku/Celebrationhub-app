@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\Helpers\ApiResponse;
 use App\Models\Template;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 class TemplateController extends Controller
@@ -13,9 +14,8 @@ class TemplateController extends Controller
         $this->ensurePublicTemplates();
 
         $orgId = $request->user()->organization_id;
-        $org   = $request->user()->organization;
+        $org = $request->user()->organization;
 
-        // Public system templates + this org's custom templates
         $templates = Template::where('is_public', true)
             ->orWhere('organization_id', $orgId)
             ->orderBy('type')
@@ -24,23 +24,19 @@ class TemplateController extends Controller
 
         $settings = $org->settings ?? [];
         $defaults = $settings['default_templates'] ?? [
-            'birthday'    => null,
+            'birthday' => null,
             'anniversary' => null,
         ];
 
-        return response()->json([
-            'success' => true,
-            'templates'       => $templates,
+        return ApiResponse::success([
+            'templates' => $templates,
             'currentDefaults' => $defaults,
         ]);
     }
 
     public function show(Request $request, $templateId)
     {
-        return response()->json([
-            'success' => true,
-            'data' => $this->findAccessibleTemplate($request, $templateId),
-        ]);
+        return ApiResponse::success($this->findAccessibleTemplate($request, $templateId));
     }
 
     public function store(Request $request)
@@ -59,11 +55,7 @@ class TemplateController extends Controller
             'is_public' => false,
         ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Template created successfully',
-            'data' => $template,
-        ], 201);
+        return ApiResponse::success($template, 'Template created successfully', 201);
     }
 
     public function update(Request $request, $templateId)
@@ -80,11 +72,7 @@ class TemplateController extends Controller
 
         $template->update($validated);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Template updated successfully',
-            'data' => $template->fresh(),
-        ]);
+        return ApiResponse::success($template->fresh(), 'Template updated successfully');
     }
 
     public function destroy(Request $request, $templateId)
@@ -92,10 +80,7 @@ class TemplateController extends Controller
         $template = $this->findOwnedTemplate($request, $templateId);
         $template->delete();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Template deleted successfully',
-        ]);
+        return ApiResponse::success(null, 'Template deleted successfully');
     }
 
     public function setDefault(Request $request, $templateId)
@@ -105,7 +90,7 @@ class TemplateController extends Controller
         ]);
 
         $type = $request->input('type');
-        $org  = $request->user()->organization;
+        $org = $request->user()->organization;
         $template = $this->findAccessibleTemplate($request, $templateId);
 
         if ($template->type !== $type) {
@@ -124,18 +109,14 @@ class TemplateController extends Controller
         $org->settings = $settings;
         $org->save();
 
-        return response()->json([
-            'success' => true,
-            'message' => "Template set as default for {$type}s",
-        ]);
+        return ApiResponse::success(null, "Template set as default for {$type}s");
     }
 
     public function preview(Request $request, $templateId)
     {
         $template = $this->findAccessibleTemplate($request, $templateId);
 
-        return response()->json([
-            'success' => true,
+        return ApiResponse::success([
             'previewUrl' => $template->preview_url
                 ?? $template->background_url
                 ?? "https://via.placeholder.com/800x600/4f46e5/ffffff?text=Preview+{$templateId}",

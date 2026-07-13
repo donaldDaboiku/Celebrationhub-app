@@ -1,11 +1,11 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { getCredits, purchaseCredits } from '@/lib/api';
+import { useState } from 'react';
+import { purchaseCredits } from '@/lib/api';
+import { getCreditWarningCopy } from '@/lib/credits';
+import { useSmsCredits } from '@/hooks/useSmsCredits';
 
 export default function SMSCreditManagement() {
-  const [credits, setCredits] = useState(null);
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { balance: credits, transactions, status, loading, refresh } = useSmsCredits();
   const [purchasing, setPurchasing] = useState(false);
 
   const packages = [
@@ -35,28 +35,14 @@ export default function SMSCreditManagement() {
     }
   ];
  
-useEffect(() => {
-    const loadData = async () => {
-      try {
-        const response = await getCredits();
-        setCredits(response.data.balance);
-        setTransactions(response.data.transactions || []);
-      } catch (error) {
-        console.error('Failed to load credits:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, []);
-
   const handlePurchase = async (packageId) => {
     setPurchasing(true);
     try {
       const response = await purchaseCredits(packageId);
       if (response.data?.paymentUrl) {
         window.location.href = response.data.paymentUrl;
+      } else {
+        await refresh();
       }
     } catch (error) {
       console.error('Failed to initiate purchase:', error);
@@ -66,14 +52,10 @@ useEffect(() => {
     }
   };
 
-  const getBalanceStatus = () => {
-    if (credits === null) return 'unknown';
-    if (credits < 20) return 'critical';
-    if (credits < 50) return 'low';
-    return 'healthy';
-  };
+  const getBalanceStatus = () => status;
 
-  const status = getBalanceStatus();
+  const statusLabel = getBalanceStatus();
+  const warningCopy = getCreditWarningCopy(credits, statusLabel);
 
   if (loading) {
     return <div style={{ padding: '40px', textAlign: 'center' }}>Loading...</div>;
@@ -81,14 +63,21 @@ useEffect(() => {
 
   return (
     <div className="sms-credit-management">
+      {warningCopy && (
+        <div className={`balance-warning ${statusLabel}`} role="alert">
+          <strong>{warningCopy.title}</strong>
+          <p>{warningCopy.message}</p>
+        </div>
+      )}
+
       {/* Current Balance */}
-      <div className={`balance-card status-${status}`}>
+      <div className={`balance-card status-${statusLabel}`}>
         <div className="balance-header">
           <span className="balance-label">SMS Credit Balance</span>
-          <span className={`status-badge ${status}`}>
-            {status === 'healthy' && '🟢 Healthy'}
-            {status === 'low' && '🟡 Low'}
-            {status === 'critical' && '🔴 Critical'}
+          <span className={`status-badge ${statusLabel}`}>
+            {statusLabel === 'healthy' && '🟢 Healthy'}
+            {statusLabel === 'low' && '🟡 Low'}
+            {statusLabel === 'critical' && '🔴 Critical'}
           </span>
         </div>
         <div className="balance-value">{credits}</div>
@@ -135,7 +124,7 @@ useEffect(() => {
                 </div>
                 <div className="transaction-details">
                   <div className="transaction-type">
-                    {tx.type === 'purchase' ? 'Credit Purchase' : 'SMS Sent'}
+                    {tx.type === 'purchase' ? 'Credit Purchase' : tx.type === 'debit' ? 'SMS Sent' : 'Transaction'}
                   </div>
                   <div className="transaction-date">
                     {new Date(tx.createdAt).toLocaleDateString('en-US', {
@@ -160,6 +149,35 @@ useEffect(() => {
           padding: 24px;
           max-width: 1200px;
           margin: 0 auto;
+        }
+
+        .balance-warning {
+          border-radius: 12px;
+          padding: 14px 16px;
+          margin-bottom: 20px;
+        }
+
+        .balance-warning.low {
+          background: #fffbeb;
+          border: 1px solid #fcd34d;
+          color: #92400e;
+        }
+
+        .balance-warning.critical {
+          background: #fef2f2;
+          border: 1px solid #fca5a5;
+          color: #991b1b;
+        }
+
+        .balance-warning strong {
+          display: block;
+          margin-bottom: 4px;
+        }
+
+        .balance-warning p {
+          margin: 0;
+          font-size: 14px;
+          line-height: 1.45;
         }
 
         .balance-card {

@@ -14,37 +14,41 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // -- members: generated columns + indexes -------------------------
-        Schema::table('members', function (Blueprint $table) {
-            $table->tinyInteger('birthday_day')
-                  ->virtualAs('DAY(birthday)')
-                  ->nullable()
-                  ->after('birthday');
+        $driver = Schema::getConnection()->getDriverName();
 
-            $table->tinyInteger('birthday_month')
-                  ->virtualAs('MONTH(birthday)')
-                  ->nullable()
-                  ->after('birthday_day');
+        Schema::table('members', function (Blueprint $table) use ($driver) {
+            if ($driver === 'mysql') {
+                $table->tinyInteger('birthday_day')
+                    ->virtualAs('DAY(birthday)')
+                    ->nullable()
+                    ->after('birthday');
 
-            $table->tinyInteger('anniversary_day')
-                  ->virtualAs('DAY(anniversary)')
-                  ->nullable()
-                  ->after('anniversary');
+                $table->tinyInteger('birthday_month')
+                    ->virtualAs('MONTH(birthday)')
+                    ->nullable()
+                    ->after('birthday_day');
 
-            $table->tinyInteger('anniversary_month')
-                  ->virtualAs('MONTH(anniversary)')
-                  ->nullable()
-                  ->after('anniversary_day');
+                $table->tinyInteger('anniversary_day')
+                    ->virtualAs('DAY(anniversary)')
+                    ->nullable()
+                    ->after('anniversary');
 
-            // Composite indexes for the daily job queries
-            $table->index(['birthday_month', 'birthday_day'],         'idx_birthday_md');
-            $table->index(['anniversary_month', 'anniversary_day'],   'idx_anniversary_md');
+                $table->tinyInteger('anniversary_month')
+                    ->virtualAs('MONTH(anniversary)')
+                    ->nullable()
+                    ->after('anniversary_day');
+            } else {
+                $table->tinyInteger('birthday_day')->nullable()->after('birthday');
+                $table->tinyInteger('birthday_month')->nullable()->after('birthday_day');
+                $table->tinyInteger('anniversary_day')->nullable()->after('anniversary');
+                $table->tinyInteger('anniversary_month')->nullable()->after('anniversary_day');
+            }
 
-            // Composite index for active+approved filter (used everywhere)
-            $table->index(['organization_id', 'active', 'approved'],  'idx_org_active_approved');
+            $table->index(['birthday_month', 'birthday_day'], 'idx_birthday_md');
+            $table->index(['anniversary_month', 'anniversary_day'], 'idx_anniversary_md');
+            $table->index(['organization_id', 'active', 'approved'], 'idx_org_active_approved');
         });
 
-        // -- organizations: sms_credits column ----------------------------
         Schema::table('organizations', function (Blueprint $table) {
             $table->unsignedInteger('sms_credits')->default(0)->after('member_limit');
         });

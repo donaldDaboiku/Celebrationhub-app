@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\MessageCampaign;
 use App\Models\MessageLog;
 use App\Models\Member;
+use App\Services\CreditService;
 use App\Services\EmailService;
 use App\Services\TermiiService;
 use Illuminate\Bus\Queueable;
@@ -25,7 +26,7 @@ class SendBulkMessages implements ShouldQueue
         $this->campaign = $campaign;
     }
 
-    public function handle(EmailService $emailService, TermiiService $termiiService): void
+    public function handle(EmailService $emailService, TermiiService $termiiService, CreditService $creditService): void
     {
         Log::info("Starting bulk message campaign: {$this->campaign->name}");
 
@@ -71,7 +72,8 @@ class SendBulkMessages implements ShouldQueue
                         $emailService,
                         $termiiService,
                         $smsIntegration,
-                        $whatsappIntegration
+                        $whatsappIntegration,
+                        $creditService
                     );
 
                     $success = $result['success'] || $success;
@@ -113,7 +115,8 @@ class SendBulkMessages implements ShouldQueue
         EmailService $emailService,
         TermiiService $termiiService,
         array $smsIntegration,
-        array $whatsappIntegration
+        array $whatsappIntegration,
+        CreditService $creditService
     ): array {
         if ($channel === 'email') {
             if (! $member->email) {
@@ -142,9 +145,35 @@ class SendBulkMessages implements ShouldQueue
             return ['success' => false];
         }
 
-        $result = $channel === 'sms'
-            ? $termiiService->sendSMS($member->phone, $message, $smsIntegration['sender_id'] ?? null)
-            : $termiiService->sendWhatsApp($member->phone, $message, $whatsappIntegration['sender_id'] ?? null);
+        if ($channel === 'sms') {
+            if (! $creditService->hasCredits($this->campaign->organization)) {
+                $this->recordLog($member->id, 'sms', false, null, 'Insufficient SMS credits.');
+
+                return ['success' => false, 'error' => 'Insufficient SMS credits.'];
+            }
+
+            $result = $termiiService->sendSMS($member->phone, $message, $smsIntegration['sender_id'] ?? null);
+
+            if ($result['success']) {
+                $creditService->debit($this->campaign->organization, 1, [
+                    'source' => 'campaign',
+                    'campaign_id' => $this->campaign->id,
+                    'member_id' => $member->id,
+                ]);
+            }
+
+            $this->recordLog(
+                $member->id,
+                'sms',
+                $result['success'],
+                $result['message_id'] ?? null,
+                $result['error'] ?? null
+            );
+
+            return $result;
+        }
+
+        $result = $termiiService->sendWhatsApp($member->phone, $message, $whatsappIntegration['sender_id'] ?? null);
 
         $this->recordLog(
             $member->id,

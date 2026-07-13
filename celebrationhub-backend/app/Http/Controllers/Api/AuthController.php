@@ -2,13 +2,15 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
-use App\Models\Organization;
+use App\Http\Requests\LoginRequest;
+use App\Http\Requests\RegisterRequest;
 use App\Models\User;
-use App\Models\Subscription;
+use App\Services\AuthService;
 use App\Services\EmailService;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
@@ -16,182 +18,61 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    /**
-     * Register new organization
-     */
-    public function register(Request $request)
+    public function __construct(private AuthService $authService)
     {
-        $validated = $request->validate([
-            'organization_name' => 'required|string|min:2|max:255',
-            'email' => 'required|email|unique:users,email',
-            'password' => ['required', 'string', Password::min(8)],
-            'name' => 'required|string|min:2|max:255',
-        ]);
-
-        // Create slug from organization name
-        $slug = Str::slug($validated['organization_name']);
-        
-        // Check if slug exists
-        if (Organization::where('slug', $slug)->exists()) {
-            $slug = $slug . '-' . Str::random(4);
-        }
-
-        // Create organization
-        $organization = Organization::create([
-            'name' => $validated['organization_name'],
-            'slug' => $slug,
-            'email' => $validated['email'],
-            'settings' => [
-                'timezone' => 'Africa/Lagos',
-                'send_time' => '06:00',
-                'branding' => [
-                    'primary_color' => '#667eea',
-                    'secondary_color' => '#764ba2',
-                ],
-                'messaging' => [
-                    'email_enabled' => true,
-                    'sms_enabled' => false,
-                    'whatsapp_enabled' => false,
-                    'primary_channel' => 'email',
-                ],
-                'integrations' => [
-                    'email' => [
-                        'mailer' => 'smtp',
-                        'host' => '',
-                        'port' => 587,
-                        'username' => '',
-                        'password' => '',
-                        'encryption' => 'tls',
-                        'from_address' => $validated['email'],
-                        'from_name' => $validated['organization_name'],
-                    ],
-                ],
-            ],
-        ]);
-
-        // Create admin user
-        $user = User::create([
-            'organization_id' => $organization->id,
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'role' => 'admin',
-        ]);
-
-        // Create trial subscription
-        Subscription::create([
-            'organization_id' => $organization->id,
-            'plan_tier' => 'starter',
-            'status' => 'trial',
-            'current_period_start' => now(),
-            'current_period_end' => now()->addDays(14), // 14-day trial
-        ]);
-
-        // Generate token
-        $token = $user->createToken('auth-token')->plainTextToken;
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Organization registered successfully',
-            'data' => [
-                'user' => [
-                    'id' => $user->id,
-                    'email' => $user->email,
-                    'name' => $user->name,
-                    'role' => $user->role,
-                ],
-                'organization' => [
-                    'id' => $organization->id,
-                    'name' => $organization->name,
-                    'slug' => $organization->slug,
-                    'logo_url' => $organization->logo_url,
-                ],
-                'token' => $token,
-            ],
-        ], 201);
     }
 
-    /**
-     * Login user
-     */
-    public function login(Request $request)
+    public function register(RegisterRequest $request)
     {
-        $validated = $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|string',
-        ]);
+        $result = $this->authService->register($request->validated());
 
-        $user = User::where('email', $validated['email'])->first();
+        return ApiResponse::success(
+            $this->formatAuthPayload($result['user'], $result['organization'], $result['token']),
+            'Organization registered successfully',
+            201
+        );
+    }
 
-        if (!$user || !Hash::check($validated['password'], $user->password)) {
+    public function login(LoginRequest $request)
+    {
+        $result = $this->authService->login($request->validated());
+
+        if (! $result) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
-        // Update last login
-        $user->update(['last_login_at' => now()]);
-
-        // Generate token
-        $token = $user->createToken('auth-token')->plainTextToken;
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Logged in successfully',
-            'data' => [
-                'user' => [
-                    'id' => $user->id,
-                    'email' => $user->email,
-                    'name' => $user->name,
-                    'role' => $user->role,
-                ],
-                'organization' => [
-                    'id' => $user->organization->id,
-                    'name' => $user->organization->name,
-                    'slug' => $user->organization->slug,
-                    'logo_url' => $user->organization->logo_url,
-                ],
-                'token' => $token,
-            ],
-        ]);
+        return ApiResponse::success(
+            $this->formatAuthPayload($result['user'], $result['organization'], $result['token']),
+            'Logged in successfully'
+        );
     }
 
-    /**
-     * Get authenticated user
-     */
     public function me(Request $request)
     {
         $user = $request->user()->load(['organization.activeSubscription']);
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'id' => $user->id,
-                'email' => $user->email,
-                'name' => $user->name,
-                'role' => $user->role,
-                'organization' => [
-                    'id' => $user->organization->id,
-                    'name' => $user->organization->name,
-                    'slug' => $user->organization->slug,
-                    'logo_url' => $user->organization->logo_url,
-                    'subscription' => $user->organization->activeSubscription,
-                ],
+        return ApiResponse::success([
+            'id' => $user->id,
+            'email' => $user->email,
+            'name' => $user->name,
+            'role' => $user->role,
+            'organization' => [
+                'id' => $user->organization->id,
+                'name' => $user->organization->name,
+                'slug' => $user->organization->slug,
+                'logo_url' => $user->organization->logo_url,
+                'subscription' => $user->organization->activeSubscription,
             ],
         ]);
     }
 
-    /**
-     * Logout user
-     */
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Logged out successfully',
-        ]);
+        return ApiResponse::success(null, 'Logged out successfully');
     }
 
     public function forgotPassword(Request $request, EmailService $emailService)
@@ -225,10 +106,10 @@ class AuthController extends Controller
             );
         }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'If that email exists, a reset code has been sent.',
-        ]);
+        return ApiResponse::success(
+            null,
+            'If that email exists, a reset code has been sent.'
+        );
     }
 
     public function resetAccess(Request $request)
@@ -272,9 +153,28 @@ class AuthController extends Controller
         DB::table('password_reset_tokens')->where('email', $validated['email'])->delete();
         DB::table('personal_access_tokens')->where('tokenable_type', User::class)->where('tokenable_id', $user->id)->delete();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Account access updated successfully. You can now sign in with your email and new password.',
-        ]);
+        return ApiResponse::success(
+            null,
+            'Account access updated successfully. You can now sign in with your email and new password.'
+        );
+    }
+
+    private function formatAuthPayload(User $user, $organization, string $token): array
+    {
+        return [
+            'user' => [
+                'id' => $user->id,
+                'email' => $user->email,
+                'name' => $user->name,
+                'role' => $user->role,
+            ],
+            'organization' => [
+                'id' => $organization->id,
+                'name' => $organization->name,
+                'slug' => $organization->slug,
+                'logo_url' => $organization->logo_url,
+            ],
+            'token' => $token,
+        ];
     }
 }

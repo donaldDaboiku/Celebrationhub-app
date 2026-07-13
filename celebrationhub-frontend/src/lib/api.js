@@ -440,3 +440,13 @@ export const deleteCampaign = async (campaignId) =>
     fetchAPI(`/campaigns/${campaignId}`, {
         method: 'DELETE',
     });
+
+// --- Credits ---
+
+export const getCredits = async () => fetchAPI('/credits');
+
+export const purchaseCredits = async (packageId) =>
+    fetchAPI('/credits/purchase', {
+        method: 'POST',
+        body: JSON.stringify({ package: packageId }),
+    });

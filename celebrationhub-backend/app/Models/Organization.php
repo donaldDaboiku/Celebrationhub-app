@@ -19,6 +19,7 @@ class Organization extends Model
         'subscription_tier',
         'subscription_status',
         'member_limit',
+        'sms_credits',
         'settings',
     ];
 
@@ -52,5 +53,10 @@ class Organization extends Model
         return $this->hasOne(Subscription::class)
             ->where('status', 'active')
             ->latest();
+    }
+
+    public function creditTransactions(): HasMany
+    {
+        return $this->hasMany(CreditTransaction::class);
     }
 }

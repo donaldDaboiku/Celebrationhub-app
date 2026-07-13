@@ -2,18 +2,24 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use App\Jobs\SendBulkMessages;
 use App\Models\Member;
 use App\Models\MessageCampaign;
 use App\Models\MessageLog;
+use App\Services\CreditService;
 use App\Services\EmailService;
 use App\Services\TermiiService;
-use Illuminate\Http\Request;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Http\Request;
 
 class CampaignController extends Controller
 {
+    public function __construct(private CreditService $creditService)
+    {
+    }
+
     private function buildRecipientQuery(MessageCampaign $campaign)
     {
         $query = Member::where('organization_id', $campaign->organization_id)
@@ -33,13 +39,10 @@ class CampaignController extends Controller
         return $query;
     }
 
-    private function ensureOwnership(Request $request, MessageCampaign $campaign)
+    private function ensureOwnership(Request $request, MessageCampaign $campaign): void
     {
         if ($campaign->organization_id !== $request->user()->organization_id) {
-            throw new HttpResponseException(response()->json([
-                'success' => false,
-                'message' => 'Campaign not found',
-            ], 404));
+            throw new HttpResponseException(ApiResponse::error('Campaign not found', 404));
         }
     }
 
@@ -150,11 +153,25 @@ class CampaignController extends Controller
         }
 
         if ($channel === 'sms') {
-            return $termiiService->sendSMS(
+            if (! $this->creditService->hasCredits($campaign->organization)) {
+                return ['success' => false, 'error' => 'Insufficient SMS credits.'];
+            }
+
+            $result = $termiiService->sendSMS(
                 $member->phone,
                 $message,
                 $smsIntegration['sender_id'] ?? null
             );
+
+            if ($result['success']) {
+                $this->creditService->debit($campaign->organization, 1, [
+                    'source' => 'campaign_retry',
+                    'campaign_id' => $campaign->id,
+                    'member_id' => $member->id,
+                ]);
+            }
+
+            return $result;
         }
 
         return $termiiService->sendWhatsApp(
@@ -164,9 +181,6 @@ class CampaignController extends Controller
         );
     }
 
-    /**
-     * List campaigns
-     */
     public function index(Request $request)
     {
         $campaigns = MessageCampaign::where('organization_id', $request->user()->organization_id)
@@ -174,15 +188,9 @@ class CampaignController extends Controller
             ->latest()
             ->paginate(20);
 
-        return response()->json([
-            'success' => true,
-            'data' => $campaigns,
-        ]);
+        return ApiResponse::success($campaigns);
     }
 
-    /**
-     * Create campaign
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -206,50 +214,29 @@ class CampaignController extends Controller
         $recipientCount = $this->buildRecipientQuery($campaign)->count();
         $campaign->update(['recipient_count' => $recipientCount]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Campaign created successfully',
-            'data' => $campaign->fresh(),
-        ], 201);
+        return ApiResponse::success($campaign->fresh(), 'Campaign created successfully', 201);
     }
 
-    /**
-     * Send campaign now
-     */
     public function send(Request $request, MessageCampaign $campaign)
     {
         $this->ensureOwnership($request, $campaign);
 
         if ($campaign->status !== 'draft') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Campaign already sent or in progress',
-            ], 400);
+            return ApiResponse::error('Campaign already sent or in progress', 400);
         }
 
         if ($campaign->scheduled_for) {
             SendBulkMessages::dispatch($campaign)->delay($campaign->scheduled_for);
             $campaign->update(['status' => 'scheduled']);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Campaign queued for sending',
-                'data' => $campaign->fresh(),
-            ]);
+            return ApiResponse::success($campaign->fresh(), 'Campaign queued for sending');
         }
 
         SendBulkMessages::dispatchSync($campaign);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Campaign sent successfully',
-            'data' => $campaign->fresh(),
-        ]);
+        return ApiResponse::success($campaign->fresh(), 'Campaign sent successfully');
     }
 
-    /**
-     * Get campaign details
-     */
     public function show(Request $request, MessageCampaign $campaign)
     {
         $this->ensureOwnership($request, $campaign);
@@ -259,18 +246,12 @@ class CampaignController extends Controller
             'logs.member:id,title,first_name,last_name,email,phone',
         ]);
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                ...$campaign->toArray(),
-                'delivery_summary' => $this->buildDeliverySummary($campaign),
-            ],
+        return ApiResponse::success([
+            ...$campaign->toArray(),
+            'delivery_summary' => $this->buildDeliverySummary($campaign),
         ]);
     }
 
-    /**
-     * Retry only the most recent failed delivery per member/channel.
-     */
     public function resendFailed(
         Request $request,
         MessageCampaign $campaign,
@@ -290,10 +271,7 @@ class CampaignController extends Controller
             ->filter(fn (MessageLog $log) => $log->status === 'failed' && $log->member);
 
         if ($retryCandidates->isEmpty()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No failed recipients to retry for this campaign.',
-            ], 400);
+            return ApiResponse::error('No failed recipients to retry for this campaign.', 400);
         }
 
         $retried = 0;
@@ -331,16 +309,12 @@ class CampaignController extends Controller
 
         $this->refreshCampaignCounts($campaign);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Failed campaign deliveries retried.',
-            'data' => [
-                'retried' => $retried,
-                'sent' => $sent,
-                'failed' => $failed,
-                'campaign' => $campaign->fresh(),
-            ],
-        ]);
+        return ApiResponse::success([
+            'retried' => $retried,
+            'sent' => $sent,
+            'failed' => $failed,
+            'campaign' => $campaign->fresh(),
+        ], 'Failed campaign deliveries retried.');
     }
 
     public function archive(Request $request, MessageCampaign $campaign)
@@ -348,19 +322,12 @@ class CampaignController extends Controller
         $this->ensureOwnership($request, $campaign);
 
         if ($campaign->status === 'archived') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Campaign is already archived.',
-            ], 400);
+            return ApiResponse::error('Campaign is already archived.', 400);
         }
 
         $campaign->update(['status' => 'archived']);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Campaign archived successfully.',
-            'data' => $campaign->fresh(),
-        ]);
+        return ApiResponse::success($campaign->fresh(), 'Campaign archived successfully.');
     }
 
     public function destroy(Request $request, MessageCampaign $campaign)
@@ -370,9 +337,6 @@ class CampaignController extends Controller
         $campaign->logs()->delete();
         $campaign->delete();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Campaign deleted successfully.',
-        ]);
+        return ApiResponse::success(null, 'Campaign deleted successfully.');
     }
 }

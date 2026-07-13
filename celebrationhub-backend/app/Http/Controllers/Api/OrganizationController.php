@@ -2,35 +2,28 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class OrganizationController extends Controller
 {
-    /**
-     * Get organization settings
-     */
     public function settings(Request $request)
     {
         $organization = $request->user()->organization;
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'name' => $organization->name,
-                'slug' => $organization->slug,
-                'email' => $organization->email,
-                'phone' => $organization->phone,
-                'logo_url' => $organization->logo_url,
-                'settings' => $organization->settings,
-            ],
+        return ApiResponse::success([
+            'id' => $organization->id,
+            'name' => $organization->name,
+            'slug' => $organization->slug,
+            'email' => $organization->email,
+            'phone' => $organization->phone,
+            'logo_url' => $organization->logo_url,
+            'settings' => $organization->settings,
         ]);
     }
 
-    /**
-     * Update organization settings
-     */
     public function updateSettings(Request $request)
     {
         $validated = $request->validate([
@@ -81,7 +74,6 @@ class OrganizationController extends Controller
 
         $organization = $request->user()->organization;
 
-        // Update basic info
         if (isset($validated['name'])) {
             $organization->name = $validated['name'];
         }
@@ -92,7 +84,6 @@ class OrganizationController extends Controller
             $organization->phone = $validated['phone'];
         }
 
-        // Update settings (merge with existing)
         if (isset($validated['settings'])) {
             $currentSettings = $organization->settings ?? [];
             $organization->settings = array_replace_recursive($currentSettings, $validated['settings']);
@@ -100,20 +91,13 @@ class OrganizationController extends Controller
 
         $organization->save();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Settings updated successfully',
-            'data' => $organization,
-        ]);
+        return ApiResponse::success($organization, 'Settings updated successfully');
     }
 
-    /**
-     * Upload logo
-     */
     public function uploadLogo(Request $request)
     {
         $request->validate([
-            'logo' => 'required|image|mimes:jpeg,png,jpg|max:2048', // 2MB max
+            'logo' => 'required|image|mimes:jpeg,png,jpg|max:2048',
         ]);
 
         $organization = $request->user()->organization;
@@ -122,7 +106,6 @@ class OrganizationController extends Controller
             mkdir(public_path('logos'), 0755, true);
         }
 
-        // Delete old logo if it points to the public logos folder.
         if ($organization->logo_url) {
             $oldPath = parse_url($organization->logo_url, PHP_URL_PATH);
             $oldAbsolutePath = $oldPath ? public_path(ltrim($oldPath, '/')) : null;
@@ -139,13 +122,7 @@ class OrganizationController extends Controller
         $organization->logo_url = asset('logos/' . $filename);
         $organization->save();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Logo uploaded successfully',
-            'data' => [
-                'logo_url' => $organization->logo_url,
-            ],
-        ]);
+        return ApiResponse::success(['logo_url' => $organization->logo_url], 'Logo uploaded successfully');
     }
 
     public function removeLogo(Request $request)
@@ -164,18 +141,9 @@ class OrganizationController extends Controller
         $organization->logo_url = null;
         $organization->save();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Logo removed successfully',
-            'data' => [
-                'logo_url' => null,
-            ],
-        ]);
+        return ApiResponse::success(['logo_url' => null], 'Logo removed successfully');
     }
 
-    /**
-     * Update message templates
-     */
     public function updateMessageTemplates(Request $request)
     {
         $validated = $request->validate([
@@ -187,22 +155,15 @@ class OrganizationController extends Controller
         $organization = $request->user()->organization;
         $settings = $organization->settings ?? [];
 
-        if (!isset($settings['messages'])) {
+        if (! isset($settings['messages'])) {
             $settings['messages'] = [];
         }
 
-        $settings['messages'] = array_merge(
-            $settings['messages'],
-            $validated
-        );
+        $settings['messages'] = array_merge($settings['messages'], $validated);
 
         $organization->settings = $settings;
         $organization->save();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Message templates updated successfully',
-            'data' => $settings['messages'],
-        ]);
+        return ApiResponse::success($settings['messages'], 'Message templates updated successfully');
     }
 }

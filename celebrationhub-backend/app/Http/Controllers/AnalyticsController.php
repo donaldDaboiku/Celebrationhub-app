@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Member;
+use App\Models\MessageLog;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Schema;
 
@@ -45,14 +46,8 @@ class AnalyticsController extends Controller
         // --- Upcoming celebrations (next 7 days) — single queries, no loop ---
         $upcoming = $this->getUpcomingCelebrations($orgId);
 
-        // --- Message delivery stats ---
-        // TODO: replace with real MessageLog aggregation
-        $messageStats = [
-            'messages'      => 0,
-            'messageTrend'  => 0,
-            'deliveryRate'  => 0,
-            'deliveryTrend' => 0,
-        ];
+        $messageStats = $this->buildMessageStats($orgId, $now);
+        $deliveryByChannel = $this->buildDeliveryByChannel($orgId, $now);
 
         return response()->json([
             'monthSummary' => [
@@ -72,8 +67,76 @@ class AnalyticsController extends Controller
             'growthData'          => $growth['data'],
             'memberBreakdowns'    => $this->buildMemberBreakdowns($orgId, $memberFieldLabels),
             'upcoming'            => $upcoming,
-            'delivery'            => ['email' => 0, 'sms' => 0, 'whatsapp' => 0],
+            'delivery'            => $deliveryByChannel,
         ]);
+    }
+
+    private function buildMessageStats(int $orgId, Carbon $now): array
+    {
+        $monthStart = $now->copy()->startOfMonth();
+        $lastMonthStart = $now->copy()->subMonth()->startOfMonth();
+        $lastMonthEnd = $now->copy()->subMonth()->endOfMonth();
+
+        $messagesThisMonth = MessageLog::where('organization_id', $orgId)
+            ->where('created_at', '>=', $monthStart)
+            ->count();
+
+        $messagesLastMonth = MessageLog::where('organization_id', $orgId)
+            ->whereBetween('created_at', [$lastMonthStart, $lastMonthEnd])
+            ->count();
+
+        $messageTrend = $messagesLastMonth > 0
+            ? round((($messagesThisMonth - $messagesLastMonth) / $messagesLastMonth) * 100)
+            : ($messagesThisMonth > 0 ? 100 : 0);
+
+        $attemptsThisMonth = $messagesThisMonth;
+        $successfulThisMonth = MessageLog::where('organization_id', $orgId)
+            ->where('created_at', '>=', $monthStart)
+            ->whereIn('status', ['sent', 'delivered'])
+            ->count();
+
+        $deliveryRate = $attemptsThisMonth > 0
+            ? round(($successfulThisMonth / $attemptsThisMonth) * 100, 1)
+            : 0;
+
+        $attemptsLastMonth = $messagesLastMonth;
+        $successfulLastMonth = MessageLog::where('organization_id', $orgId)
+            ->whereBetween('created_at', [$lastMonthStart, $lastMonthEnd])
+            ->whereIn('status', ['sent', 'delivered'])
+            ->count();
+
+        $lastDeliveryRate = $attemptsLastMonth > 0
+            ? round(($successfulLastMonth / $attemptsLastMonth) * 100, 1)
+            : 0;
+
+        $deliveryTrend = $attemptsLastMonth > 0
+            ? round($deliveryRate - $lastDeliveryRate, 1)
+            : ($attemptsThisMonth > 0 ? $deliveryRate : 0);
+
+        return [
+            'messages' => $messagesThisMonth,
+            'messageTrend' => $messageTrend,
+            'deliveryRate' => $deliveryRate,
+            'deliveryTrend' => $deliveryTrend,
+        ];
+    }
+
+    private function buildDeliveryByChannel(int $orgId, Carbon $now): array
+    {
+        $monthStart = $now->copy()->startOfMonth();
+
+        $counts = MessageLog::where('organization_id', $orgId)
+            ->where('created_at', '>=', $monthStart)
+            ->whereIn('status', ['sent', 'delivered'])
+            ->selectRaw('channel, COUNT(*) as total')
+            ->groupBy('channel')
+            ->pluck('total', 'channel');
+
+        return [
+            'email' => (int) ($counts['email'] ?? 0),
+            'sms' => (int) ($counts['sms'] ?? 0),
+            'whatsapp' => (int) ($counts['whatsapp'] ?? 0),
+        ];
     }
 
     private function resolveMemberFieldLabels(array $settings): array
@@ -195,18 +258,12 @@ class AnalyticsController extends Controller
         // Build list of (day, month) pairs for the 7-day window
         $pairs = $window->map(fn ($d) => [$d->day, $d->month]);
 
-        // One query per celebration type
         $birthdayMembers = Member::where('organization_id', $orgId)
             ->active()
             ->approved()
             ->whereNotNull('birthday')
             ->where(function ($q) use ($pairs) {
-                foreach ($pairs as [$day, $month]) {
-                    $q->orWhere(function ($q2) use ($day, $month) {
-                        $q2->whereRaw('DAY(birthday) = ?', [$day])
-                           ->whereRaw('MONTH(birthday) = ?', [$month]);
-                    });
-                }
+                $this->applyCelebrationDateWindow($q, 'birthday', $pairs);
             })
             ->get(['first_name', 'last_name', 'title', 'birthday']);
 
@@ -215,12 +272,7 @@ class AnalyticsController extends Controller
             ->approved()
             ->whereNotNull('anniversary')
             ->where(function ($q) use ($pairs) {
-                foreach ($pairs as [$day, $month]) {
-                    $q->orWhere(function ($q2) use ($day, $month) {
-                        $q2->whereRaw('DAY(anniversary) = ?', [$day])
-                           ->whereRaw('MONTH(anniversary) = ?', [$month]);
-                    });
-                }
+                $this->applyCelebrationDateWindow($q, 'anniversary', $pairs);
             })
             ->get(['first_name', 'last_name', 'title', 'anniversary']);
 
@@ -261,5 +313,24 @@ class AnalyticsController extends Controller
         }
 
         return $upcoming;
+    }
+
+    private function applyCelebrationDateWindow($query, string $column, $pairs): void
+    {
+        $driver = Schema::getConnection()->getDriverName();
+
+        $query->where(function ($q) use ($pairs, $column, $driver) {
+            foreach ($pairs as [$day, $month]) {
+                $q->orWhere(function ($q2) use ($day, $month, $column, $driver) {
+                    if ($driver === 'sqlite') {
+                        $q2->whereRaw("strftime('%d', {$column}) = ?", [sprintf('%02d', $day)])
+                            ->whereRaw("strftime('%m', {$column}) = ?", [sprintf('%02d', $month)]);
+                    } else {
+                        $q2->whereRaw("DAY({$column}) = ?", [$day])
+                            ->whereRaw("MONTH({$column}) = ?", [$month]);
+                    }
+                });
+            }
+        });
     }
 }

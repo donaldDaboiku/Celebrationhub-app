@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use App\Imports\MembersImport;
 use App\Exports\MembersTemplateExport;
@@ -38,21 +39,14 @@ class MemberImportController extends Controller
 
             $stats = $import->getStats();
 
-            return response()->json([
-                'success' => true,
-                'message' => "Successfully imported {$stats['imported']} members",
-                'data' => [
-                    'imported' => $stats['imported'],
-                    'errors_count' => count($stats['errors']),
-                    'errors' => $stats['errors'],
-                ],
-            ]);
+            return ApiResponse::success([
+                'imported' => $stats['imported'],
+                'errors_count' => count($stats['errors']),
+                'errors' => $stats['errors'],
+            ], "Successfully imported {$stats['imported']} members");
 
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Import failed: ' . $e->getMessage(),
-            ], 500);
+            return ApiResponse::error('Import failed: ' . $e->getMessage(), 500);
         }
     }
 

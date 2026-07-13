@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Models\Celebration;
+use App\Models\MessageLog;
+use App\Services\CreditService;
 use App\Services\DesignService;
 use App\Services\EmailService;
 use App\Services\TermiiService;
@@ -33,7 +35,8 @@ class SendCelebrationMessages implements ShouldQueue
     public function handle(
         DesignService $designService,
         EmailService $emailService,
-        TermiiService $termiiService
+        TermiiService $termiiService,
+        CreditService $creditService
     ): void {
         $member = $this->celebration->member;
         $organization = $this->celebration->organization;
@@ -84,26 +87,56 @@ class SendCelebrationMessages implements ShouldQueue
                 'sent_at' => now()->toDateTimeString(),
                 'error' => $result['error'] ?? null,
             ];
+
+            $this->recordLog(
+                'email',
+                $result['success'],
+                $result['message_id'] ?? null,
+                $result['error'] ?? null
+            );
         } else {
             $channels['email']['error'] = 'Email channel disabled or member has no email address.';
+            $this->recordLog('email', false, null, $channels['email']['error']);
         }
 
         // Send SMS
         if (($messagingSettings['sms_enabled'] ?? false) && $member->phone) {
-            $result = $termiiService->sendSMS(
-                $member->phone,
-                $this->celebration->message_text,
-                $smsIntegration['sender_id'] ?? null
-            );
+            if (! $creditService->hasCredits($organization)) {
+                $error = 'Insufficient SMS credits.';
+                $channels['sms'] = ['sent' => false, 'error' => $error];
+                $this->recordLog('sms', false, null, $error);
+            } else {
+                $result = $termiiService->sendSMS(
+                    $member->phone,
+                    $this->celebration->message_text,
+                    $smsIntegration['sender_id'] ?? null
+                );
 
-            $channels['sms'] = [
-                'sent' => $result['success'],
-                'sent_at' => now()->toDateTimeString(),
-                'provider_id' => $result['message_id'] ?? null,
-                'error' => $result['error'] ?? null,
-            ];
+                if ($result['success']) {
+                    $creditService->debit($organization, 1, [
+                        'source' => 'celebration',
+                        'celebration_id' => $this->celebration->id,
+                        'member_id' => $member->id,
+                    ]);
+                }
+
+                $channels['sms'] = [
+                    'sent' => $result['success'],
+                    'sent_at' => now()->toDateTimeString(),
+                    'provider_id' => $result['message_id'] ?? null,
+                    'error' => $result['error'] ?? null,
+                ];
+
+                $this->recordLog(
+                    'sms',
+                    $result['success'],
+                    $result['message_id'] ?? null,
+                    $result['error'] ?? null
+                );
+            }
         } else {
             $channels['sms']['error'] = 'SMS channel disabled or member has no phone number.';
+            $this->recordLog('sms', false, null, $channels['sms']['error']);
         }
 
         // Send WhatsApp
@@ -125,8 +158,16 @@ class SendCelebrationMessages implements ShouldQueue
                 'provider_id' => $result['message_id'] ?? null,
                 'error' => $result['error'] ?? null,
             ];
+
+            $this->recordLog(
+                'whatsapp',
+                $result['success'],
+                $result['message_id'] ?? null,
+                $result['error'] ?? null
+            );
         } else {
             $channels['whatsapp']['error'] = 'WhatsApp channel disabled or member has no phone number.';
+            $this->recordLog('whatsapp', false, null, $channels['whatsapp']['error']);
         }
 
         $sentChannels = collect($channels)->filter(fn ($channel) => $channel['sent'] ?? false)->count();
@@ -142,6 +183,20 @@ class SendCelebrationMessages implements ShouldQueue
         Log::info("Completed sending messages for {$member->full_name}", [
             'status' => $status,
             'sent_channels' => $sentChannels,
+        ]);
+    }
+
+    protected function recordLog(string $channel, bool $success, ?string $providerMessageId, ?string $errorMessage): void
+    {
+        MessageLog::create([
+            'organization_id' => $this->celebration->organization_id,
+            'member_id' => $this->celebration->member_id,
+            'celebration_id' => $this->celebration->id,
+            'channel' => $channel,
+            'status' => $success ? 'sent' : 'failed',
+            'provider_message_id' => $providerMessageId,
+            'error_message' => $errorMessage,
+            'sent_at' => $success ? now() : null,
         ]);
     }
 }

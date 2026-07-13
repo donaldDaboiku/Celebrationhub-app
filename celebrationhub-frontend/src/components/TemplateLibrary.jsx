@@ -59,8 +59,8 @@ export default function TemplateLibrary() {
 
         try {
             const response = await getTemplates();
-            setTemplates(response.templates || []);
-            setDefaults(response.currentDefaults || { birthday: null, anniversary: null });
+            setTemplates(response.data?.templates || []);
+            setDefaults(response.data?.currentDefaults || { birthday: null, anniversary: null });
         } catch (error) {
             setMessage({ type: 'error', text: error.message || 'Failed to load templates.' });
         } finally {
